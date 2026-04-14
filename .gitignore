@@ -48,6 +48,17 @@ output/
 memory/
 CLAUDE.md
 
+# ---- Internal-only docs (not user-facing) ----
+docs/roadmap.md
+docs/structure.md
+
+# ---- Misc tests artifacts ----
+tests/*.pkl
+
+# ---- Runtime caches / R-Java env ----
+cache/
+rjavaenv/
+
 # ---- Paper drafts (live in a separate paper repo) ----
 paper/
 *.pdf
