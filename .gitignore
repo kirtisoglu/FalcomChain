@@ -1,20 +1,53 @@
-data
-.vscode/
-.ipynb_checkpoints/
+# ---- Python build / install artifacts ----
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 *.egg-info/
-Markov_Chain/Validity.py
-Markov_Chain/tree_old.py
+dist/
+build/
+*.whl
+
+# ---- Virtual environments ----
+.venv/
+venv/
+env/
+.python-version
+
+# ---- Test / coverage / lint caches ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Jupyter ----
+.ipynb_checkpoints/
+
+# ---- Sphinx ----
+docs/_sphinx/_build/
+docs/_sphinx/jupyter_execute/
+
+# ---- Tutorial run output (created by examples/notebooks) ----
+output/
+
+# ---- IDE / editor ----
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---- macOS ----
 .DS_Store
-notes
-.gitignore
-tests
-rjavaenv
-cache/
+
+# ---- Logs ----
 *.log
+
+# ---- AI assistant artifacts (local only) ----
 .claude/
-docs/
 memory/
+CLAUDE.md
+
+# ---- Paper drafts (live in a separate paper repo) ----
 paper/
-not_used/
+*.pdf

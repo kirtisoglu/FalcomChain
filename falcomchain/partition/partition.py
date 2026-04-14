@@ -8,12 +8,7 @@ from falcomchain.helper import load_pickle, save_pickle
 from falcomchain.tree.tree import Flip, capacitated_recursive_tree
 
 from .assignment import Assignment, get_assignment
-from .flows import (
-    compute_candidate_flows,
-    compute_node_flows,
-    compute_part_flows,
-    neighbor_flips,
-)
+from .flows import Flow, neighbor_flips
 from .subgraphs import SubgraphView
 
 
@@ -42,9 +37,7 @@ class Partition:
         "parent",
         "superflip",
         "flip",
-        "node_flows",
-        "part_flows",
-        "candidate_flows",
+        "flow",
         "step",
     )
 
@@ -95,7 +88,6 @@ class Partition:
         #use_default_updaters: bool = True,
         capacity_level=1,
         density: Optional[float] = None,
-        snapshot=False,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -133,7 +125,6 @@ class Partition:
             epsilon=epsilon,
             capacity_level=capacity_level,
             density=density,
-            snapshot=snapshot,
         )
 
         return cls(
@@ -171,10 +162,7 @@ class Partition:
         
         self.flip = flip
         self.superflip = None
-        
-        self.node_flows = None
-        self.candidate_flows = None
-        self.part_flows = {"in": set(flip.new_ids), "out": set()}
+        self.flow = Flow.initial(flip)
         self.assignment = get_assignment(assignment, graph, flip.team_flips)
 
         #if updaters is None:
@@ -204,13 +192,9 @@ class Partition:
         #self.updaters = parent.updaters.copy()
         self.flip = flip
         self.superflip = superflip
-        
-        #define a dataclass for these three functions
-        self.part_flows = compute_part_flows(superflip.merged_ids, flip.new_ids)
-        self.node_flows = compute_node_flows(parent, self)
-        self.candidate_flows = compute_candidate_flows(self)
+        self.flow = Flow.from_parent(parent, self, superflip, flip)
         self.assignment = parent.assignment.copy()
-        self.assignment.update_flows(self.node_flows, self.part_flows, self.flip.team_flips, self.candidate_flows)
+        self.assignment.update_flows(self.flow, self.flip.team_flips)
         
         #self.cut_edges = cut_edges(self) # done
         self.supergraph = supergraph(self) # done
@@ -270,14 +254,6 @@ class Partition:
     def candidates(self):
         return self.assignment.candidates
 
-    @property
-    def centers(self):
-        return self.assignment.centers
-
-    @property
-    def radius(self):
-        return self.assignment.radius
-
 
     def save(self, path: str):
         """
@@ -291,6 +267,140 @@ class Partition:
         metadata = {"capacity_level": self.capacity_level}
         data = {"flips": flips, "team_flips": teams, "metadata": metadata}
         save_pickle(data, path)
+
+    def save_json(self, path: str):
+        """
+        Save the partition as a human-readable JSON file.
+
+        The file contains the full assignment (node -> district), team
+        allocations (district -> teams), per-district demand, and metadata.
+        Node and district IDs are converted to strings for JSON compatibility.
+
+        :param path: File path to write to.
+        :type path: str
+        """
+        import json
+
+        districts = {}
+        for part_id, nodes in self.parts.items():
+            demand = sum(self.graph.nodes[n].get("demand", 0) for n in nodes)
+            candidates = [str(n) for n in nodes
+                          if self.graph.nodes[n].get("candidate", 0)]
+            districts[str(part_id)] = {
+                "nodes": sorted(str(n) for n in nodes),
+                "teams": self.teams[part_id],
+                "demand": demand,
+                "candidates": candidates,
+            }
+
+        data = {
+            "num_districts": len(self.parts),
+            "total_teams": sum(self.teams.values()),
+            "total_nodes": sum(len(nodes) for nodes in self.parts.values()),
+            "capacity_level": self.capacity_level,
+            "assignment": {str(k): str(v) for k, v in self.assignment.mapping.items()},
+            "districts": districts,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    def write_to_graph(self, graph=None):
+        """
+        Write this partition's state into the graph as node and graph attributes.
+        After this, the graph alone fully describes the partition.
+
+        :param graph: Optional Graph (or networkx.Graph) to write to. Defaults
+            to ``self.graph.graph`` (the underlying mutable graph).
+        """
+        if graph is None:
+            graph = self.graph.graph if hasattr(self.graph, "graph") else self.graph
+
+        for node, dist_id in self.assignment.mapping.items():
+            if node in graph:
+                graph.nodes[node]["district"] = dist_id
+
+        graph.graph["teams_per_district"] = dict(self.teams)
+        graph.graph["capacity_level"] = self.capacity_level
+
+    @classmethod
+    def from_graph(cls, graph) -> "Partition":
+        """
+        Construct a Partition from a graph that has ``district`` node attributes
+        and ``teams_per_district`` graph attribute. This is the inverse of
+        ``write_to_graph()``.
+
+        :param graph: A Graph (or networkx.Graph) with partition state stored
+            as attributes.
+        :returns: A Partition instance.
+        :rtype: Partition
+
+        :raises ValueError: If the graph lacks the required ``district`` attribute.
+        """
+        g = graph.graph if hasattr(graph, "graph") and hasattr(graph.graph, "nodes") else graph
+
+        sample_node = next(iter(g.nodes), None)
+        if sample_node is None or "district" not in g.nodes[sample_node]:
+            raise ValueError(
+                "Graph has no 'district' node attribute. "
+                "Use Partition.from_random_assignment() to create a fresh partition, "
+                "or call partition.write_to_graph() before serializing."
+            )
+
+        assignment = {n: g.nodes[n]["district"] for n in g.nodes}
+        teams = g.graph.get("teams_per_district", {})
+        capacity_level = g.graph.get("capacity_level", 1)
+
+        return cls(
+            capacity_level=capacity_level,
+            assignment=assignment,
+            flip=Flip(
+                flips=assignment,
+                team_flips=teams,
+                new_ids=frozenset(teams.keys()),
+            ),
+            graph=graph,
+        )
+
+    @classmethod
+    def load_json(cls, json_path: str, graph):
+        """
+        Load a partition from a JSON file and a graph.
+
+        :param json_path: Path to the JSON partition file.
+        :type json_path: str
+        :param graph: The graph this partition belongs to.
+        :returns: A restored Partition instance.
+        :rtype: Partition
+        """
+        import json
+
+        with open(json_path) as f:
+            data = json.load(f)
+
+        # Reconstruct the assignment dict with original node types
+        # by matching string keys back to graph nodes
+        node_str_to_id = {str(n): n for n in graph.nodes}
+        assignment = {}
+        for node_str, part_str in data["assignment"].items():
+            node_id = node_str_to_id.get(node_str, node_str)
+            assignment[node_id] = int(part_str) if part_str.isdigit() else part_str
+
+        team_flips = {
+            int(k) if k.isdigit() else k: v["teams"]
+            for k, v in data["districts"].items()
+        }
+
+        return cls(
+            capacity_level=data["capacity_level"],
+            assignment=assignment,
+            flip=Flip(
+                flips=assignment,
+                team_flips=team_flips,
+                new_ids=frozenset(team_flips.keys()),
+            ),
+            graph=graph,
+        )
 
     @classmethod
     def load_partition(cls, graph_path: str, partition_path: str):
@@ -348,8 +458,8 @@ def supergraph(partition:Partition):
         graph.remove_nodes_from(list(merged))  # Edges has gone too.
 
     leaving = merged - new_ones
-    if leaving != partition.part_flows["out"]:
-        raise SupergraphError(f"leaving parts {leaving} is not same as part out flow {partition.part_flows['out']}")
+    if leaving != partition.flow.part_flows["out"]:
+        raise SupergraphError(f"leaving parts {leaving} is not same as part out flow {partition.flow.part_flows['out']}")
     
     for node in leaving:
         if node in graph.nodes:

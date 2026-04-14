@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="FalCom Workflow">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ========== CHAIN LAYER ========== -->
+        <mxCell id="10" value="MarkovChain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="680" y="40" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== CHAIN STATE ========== -->
+        <mxCell id="20" value="ChainState&#xa;─────────────&#xa;partition&#xa;facility&#xa;super_facility&#xa;energy&#xa;energy_fn&#xa;log_proposal_ratio&#xa;beta&#xa;feasible" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="140" width="180" height="170" as="geometry" />
+        </mxCell>
+
+        <!-- ========== PARTITION ========== -->
+        <mxCell id="30" value="Partition&#xa;─────────────&#xa;graph&#xa;assignment&#xa;supergraph&#xa;capacity_level&#xa;flip&#xa;superflip&#xa;step&#xa;parent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="140" width="180" height="170" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ASSIGNMENT ========== -->
+        <mxCell id="40" value="Assignment&#xa;─────────────&#xa;parts&#xa;mapping&#xa;candidates&#xa;teams" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="340" width="180" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FLIP ========== -->
+        <mxCell id="50" value="Flip&#xa;─────────────&#xa;flips&#xa;team_flips&#xa;new_ids&#xa;merged_ids" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="340" width="180" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== PROPOSAL ========== -->
+        <mxCell id="60" value="Proposal Step" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="200" y="140" width="180" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ========== HIERARCHICAL PROPOSAL ========== -->
+        <mxCell id="70" value="hierarchical_recom&#xa;─────────────&#xa;1. RecursivePartitioning(G²)&#xa;2. Pick D² uniformly at random&#xa;3. RecursivePartitioning(G¹[D²])&#xa;4. FacilityAssignment&#xa;5. Accept / Reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="260" width="220" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- ========== RECURSIVE PARTITIONING ========== -->
+        <mxCell id="80" value="RecursivePartitioning&#xa;─────────────&#xa;while remaining_teams &gt; 0:&#xa;  two_sided = (n ≤ c_max)&#xa;  CapacitatedTreeCut()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="430" width="220" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- ========== CAPACITATED TREE CUT ========== -->
+        <mxCell id="90" value="bipartition_tree&#xa;─────────────&#xa;for m = 1..M:&#xa;  T ← uniform_spanning_tree (Wilson's)&#xa;  E ← FindFeasibleCuts(T)&#xa;  if E ≠ ∅: return Cut ∝ ψ&#xa;reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="590" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FIND FEASIBLE CUTS ========== -->
+        <mxCell id="100" value="FindFeasibleCuts&#xa;─────────────&#xa;for u in T \ {r}:&#xa;  compute φ(u), ψ(Tᵤ)&#xa;  compute φ̄(u), ψ(Tᵥ)&#xa;  check one/two-sided&#xa;  add to E" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="770" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FIND FEASIBLE SUPER CUTS ========== -->
+        <mxCell id="105" value="FindFeasibleSuperCuts&#xa;─────────────&#xa;for u in T \ {r}:&#xa;  check n_teams ≥ 2&#xa;  check demand balance&#xa;  one/two-sided&#xa;  add to E" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="770" width="220" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ========== SPANNING TREE ========== -->
+        <mxCell id="110" value="SpanningTree&#xa;─────────────&#xa;graph&#xa;root&#xa;successors&#xa;total_demand&#xa;[cut params]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="960" width="180" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== CUT ========== -->
+        <mxCell id="120" value="Cut&#xa;─────────────&#xa;node&#xa;subnodes&#xa;assigned_teams&#xa;demand" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="250" y="960" width="160" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ENERGY ========== -->
+        <mxCell id="130" value="Energy Function&#xa;─────────────&#xa;E(s) = ΣΣΣ dᵥ · dist(v, f(D))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="340" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FACILITY ASSIGNMENT ========== -->
+        <mxCell id="140" value="FacilityAssignment&#xa;SuperFacilityAssignment&#xa;─────────────&#xa;centers[part] = argmin radius&#xa;radius[part] = minimax dist" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="450" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ACCEPT ========== -->
+        <mxCell id="150" value="Accept / Reject&#xa;─────────────&#xa;always_accept (default, paper)&#xa;metropolis_hastings (optimizer)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="570" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ========== EDGES ========== -->
+
+        <!-- MarkovChain -> ChainState -->
+        <mxCell id="200" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="10" target="20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- MarkovChain -> Partition -->
+        <mxCell id="201" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="10" target="30" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- MarkovChain -> Proposal -->
+        <mxCell id="202" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="10" target="60" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ChainState -> Energy -->
+        <mxCell id="203" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="20" target="130" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ChainState -> Accept -->
+        <mxCell id="204" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="20" target="150" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Partition -> Assignment -->
+        <mxCell id="205" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="30" target="40" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Partition -> Flip -->
+        <mxCell id="206" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="30" target="50" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Proposal -> HierarchicalProposal -->
+        <mxCell id="207" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="60" target="70" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- HierarchicalProposal -> RecursivePartitioning -->
+        <mxCell id="208" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="70" target="80" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- RecursivePartitioning -> CapacitatedTreeCut -->
+        <mxCell id="209" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="80" target="90" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CapacitatedTreeCut -> FindFeasibleCuts -->
+        <mxCell id="210" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="90" target="100" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- CapacitatedTreeCut -> FindFeasibleSuperCuts -->
+        <mxCell id="211" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="90" target="105" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- FindFeasibleCuts -> SpanningTree -->
+        <mxCell id="212" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="100" target="110" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- FindFeasibleCuts -> Cut -->
+        <mxCell id="213" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="100" target="120" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- RecursivePartitioning -> Flip -->
+        <mxCell id="214" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="80" target="50" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Energy -> FacilityAssignment -->
+        <mxCell id="215" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="130" target="140" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- FacilityAssignment -> Accept -->
+        <mxCell id="216" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="140" target="150" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Accept -> ChainState (feedback) -->
+        <mxCell id="217" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=block;" edge="1" source="150" target="20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== RECORDER ========== -->
+        <mxCell id="160" value="Recorder (optional)&#xa;─────────────&#xa;binary chain.fcrec&#xa;phase data per step&#xa;export_to_json() → FalcomPlot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="520" width="220" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- MarkovChain -> Recorder -->
+        <mxCell id="220" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="10" target="160" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== LEGEND ========== -->
+        <mxCell id="300" value="Legend" style="text;html=1;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1350" y="140" width="100" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="301" value="Chain / Control" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="180" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="302" value="State Objects" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="220" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="303" value="Proposal / Tree" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="260" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="304" value="Data / Helper" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="300" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="305" value="Facility / Accept" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1330" y="340" width="160" height="30" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

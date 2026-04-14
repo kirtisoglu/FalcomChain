@@ -18,3 +18,12 @@ from .adjacency import *
 from .geo import *
 from .graph import *
 from .grid import Grid
+from .schema import (
+    NODE_ATTRIBUTES,
+    EDGE_ATTRIBUTES,
+    GRAPH_ATTRIBUTES,
+    SchemaValidationError,
+    describe_schema,
+    required_node_attributes,
+    validate_graph,
+)

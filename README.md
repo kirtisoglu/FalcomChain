@@ -1,84 +1,107 @@
-# falcomchain
+# FalcomChain
 
-A Python library for **capacitated facility location** via Markov Chain Monte Carlo (MCMC) sampling on graph partitions.
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.txt)
 
-falcomchain implements a hierarchical and capacitated ReCom algorithm that simultaneously partitions a dual graph into hierarchical service districts, locate facilities in districts, and allocates expert teams to facilities, while satisfying capacity-demand balance and user-choice constraints such as budget.
+**FalcomChain** is a Python library for **hierarchical capacitated facility
+location and districting problems** via Markov chain Monte Carlo. It samples
+from the space of feasible plans, producing ensembles of contiguous districts
+with facility assignments — useful for service zone design, sales territory
+planning, healthcare network design, and stability analysis.
 
-> **Status:** Pre-publication. The library is under active development. The Chicago healthcare dataset used for testing is not part of the paper. A new experiment will be designed separately.
+The library implements **FalCom** (Kaul & Kırtışoğlu), the first MCMC framework
+that simultaneously partitions a region into capacity-respecting districts at
+multiple hierarchy levels and assigns facilities, with convergence guarantees.
+
+> **Status:** Pre-publication, under active development. The 0.1.0 API is
+> stable but may evolve as the paper experiments solidify.
 
 ---
 
 ## What it does
 
-Given a graph where nodes are geographic units (e.g., census blocks) with population attributes, falcomchain:
+Given a graph where nodes are geographic units with demand and facility
+candidates, FalcomChain:
 
-1. Partitions the graph into contiguous districts using a capacitated spanning tree algorithm
-2. Assigns a number of doctor-nurse teams to each district based on population and capacity constraints
-3. Runs an MCMC chain over the space of valid partitions using hierarchical ReCom proposals
-4. Tracks objectives (compactness, cut edges, radius deviation) to guide or evaluate the chain
+1. **Partitions** the graph into contiguous districts using capacitated
+   spanning-tree cuts.
+2. **Allocates** service teams to each district within a maximum capacity.
+3. **Runs an MCMC chain** over the space of feasible hierarchical plans.
+4. **Records** every chain step for ensemble analysis (boundary frequency,
+   facility stability, capacity utilization).
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/kirtisoglu/Allocation-of-Primary-Care-Centers-in-Chicago
-cd Allocation-of-Primary-Care-Centers-in-Chicago
-pip install -e .
+pip install falcomchain
 ```
 
-Requires Python 3.12+.
+For development:
+
+```bash
+git clone https://github.com/kirtisoglu/FalcomChain
+cd FalcomChain
+pip install -e ".[dev]"
+```
+
+Requires **Python 3.12+**.
 
 ---
 
-## Quick start
+## Documentation
 
-```python
-from falcomchain.graph import Graph
-from falcomchain.partition import Partition
+Full documentation, tutorials, and API reference: **[falcomchain.readthedocs.io](https://falcomchain.readthedocs.io)** (coming soon).
 
-# Load your graph (must have 'population' node attribute)
-graph = Graph.from_file("my_graph.geojson")
+In the meantime, browse the local docs:
 
-# Create an initial partition
-partition = Partition.from_random_assignment(
-    graph=graph,
-    pop_target=1500,
-    epsilon=0.1,
-    capacity_level=2,
-)
+|                                            |                                          |
+| ------------------------------------------ | ---------------------------------------- |
+| [Getting started](docs/getting_started.md) | 5-minute tutorial                        |
+| [Algorithm overview](docs/algorithm.md)    | What FalCom does, conceptually           |
+| [Graph schema](docs/schema.md)             | Required and optional graph attributes   |
+| [GeoDataFrame guide](docs/geodataframe.md) | Building graphs from shapefiles/GeoJSON  |
+| [Code structure](docs/structure.md)        | Module-by-module breakdown               |
+| [Tutorials](docs/tutorials/)               | Jupyter notebook walkthroughs            |
 
-# Run the chain
-from falcomchain.markovchain import MarkovChain, hierarchical_recom, always_accept
-from functools import partial
+---
 
-proposal = partial(hierarchical_recom, pop_target=1500, epsilon=0.1)
-chain = MarkovChain(proposal=proposal, accept=always_accept, initial_state=partition, total_steps=100)
+## Visualization
 
-for state in chain:
-    print(state.step, len(state.parts))
+For interactive animation of FalCom chains (district boundaries shifting,
+spanning trees, facility selection), use the companion library
+**[FalcomPlot](https://github.com/kirtisoglu/FalcomPlot)** (PyPI release
+coming soon).
+
+---
+
+## Architecture
+
+![FalcomChain workflow](docs/falcomchain_workflow.drawio.png)
+
+---
+
+## Citation
+
+If you use FalcomChain in your research, please cite the paper:
+
+```bibtex
+@article{kaul2026falcom,
+  title={FalCom: An MCMC Sampling Framework for Facility Location and Districting Problems},
+  author={Kaul, Hemanshu and K{\i}rt{\i}{\c{s}}o{\u{g}}lu, Alaittin},
+  year={2026},
+}
 ```
 
 ---
 
-## Repository structure
+## Contributing
 
-See [docs/structure.md](docs/structure.md) for a detailed breakdown of every module.
-
----
-
-## Algorithm
-
-See [docs/algorithm.md](docs/algorithm.md) for an explanation of ReCom, hierarchical ReCom, capacitated tree partitioning, and the MCMC framework.
-
----
-
-## Data
-
-See [docs/data.md](docs/data.md) for a description of the data files used for testing and what a new experiment will require.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 
 ## License
 
-MIT License. See [LICENSE.txt](LICENSE.txt).
+MIT — see [LICENSE.txt](LICENSE.txt).

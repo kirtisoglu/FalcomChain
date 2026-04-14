@@ -27,13 +27,9 @@ def test_spanningtree(spanningtree_with_forced_root):
 
     tree = spanningtree_with_forced_root
 
-    assert tree.tot_pop == 200
-    assert tree.ideal_pop == 40
+    assert tree.total_demand == 200
+    assert tree.ideal_demand == 40
     assert tree.root == 2
-    assert tree.pop_col == "population"
-    assert tree.facility_col == "candidate"
-    assert tree.area_col == "area"
-    assert tree.density_col == "density"
     assert tree.graph.degree(tree.root) > 1
     assert tree.n_teams == 5
 

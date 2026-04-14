@@ -1,4 +1,3 @@
-import random
 from typing import Optional
 from unittest.mock import patch
 
@@ -9,9 +8,10 @@ from shapely.geometry import box
 
 from falcomchain.graph import Graph
 from falcomchain.partition import Partition
-from falcomchain.tree.tree import SpanningTree
+from falcomchain.random import set_seed
+from falcomchain.tree.tree import CutParams, SpanningTree
 
-random.seed(2025)
+set_seed(2025)
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def tree_with_attributes(tree_with_twenty_nodes):
         18,
     }  # for pop target = 40 and n_teams = 5, where total population = 200.
     for node in tree_with_twenty_nodes:
-        tree_with_twenty_nodes.nodes[node]["population"] = 10
+        tree_with_twenty_nodes.nodes[node]["demand"] = 10
         tree_with_twenty_nodes.nodes[node]["area"] = 10
         tree_with_twenty_nodes.nodes[node]["density"] = 1
         if node in candidates:
@@ -91,15 +91,16 @@ def spanningtree_with_forced_root(tree_with_attributes):
     two_sided = True
     supergraph = False
 
-    with patch("random.choice", return_value=2):
+    with patch("falcomchain.random.rng.choice", return_value=2):
         tree = SpanningTree(
             graph=tree_with_attributes,
-            ideal_pop=pop_target,
-            epsilon=epsilon,
-            n_teams=n_teams,
-            capacity_level=capacity_level,
-            column_names=column_names,
-            two_sided=two_sided,
+            params=CutParams(
+                ideal_demand=pop_target,
+                epsilon=epsilon,
+                n_teams=n_teams,
+                capacity_level=capacity_level,
+                two_sided=two_sided,
+            ),
             supergraph=supergraph,
         )
     return tree

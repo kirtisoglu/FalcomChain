@@ -1,4 +1,4 @@
 from .assignment import *
-from .flows import compute_candidate_flows, compute_node_flows, compute_part_flows
+from .flows import Flow
 from .partition import *
 from .subgraphs import SubgraphView

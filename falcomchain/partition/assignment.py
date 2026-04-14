@@ -23,7 +23,7 @@ class Assignment(Mapping):
     ``{part: <frozenset of nodes in part>}``.
     """
 
-    __slots__ = ["parts", "mapping", "candidates", "teams", "centers", "radius"]
+    __slots__ = ["parts", "mapping", "candidates", "teams"]
 
     travel_times = None
 
@@ -68,11 +68,6 @@ class Assignment(Mapping):
         self.candidates = candidates
         self.teams = teams
 
-        self.centers = {}
-        self.radius = {}
-        for part in parts.keys():
-            self.centers[part], self.radius[part] = self.facility_assignment(part)
-
         if not mapping:
             self.mapping = {}
             for part, nodes in self.parts.items():
@@ -93,7 +88,7 @@ class Assignment(Mapping):
     def __getitem__(self, node):
         return self.mapping[node]
 
-    def copy(self):
+    def copy(self) -> "Assignment":
         """
         Returns a copy of the assignment.
         Does not duplicate the frozensets of nodes, just the parts dictionary.
@@ -106,66 +101,64 @@ class Assignment(Mapping):
             validate=False,
         )
 
+    def facility_assignment(self, part) -> tuple:
+        """
+        Find the best facility center for ``part`` by minimising the maximum
+        travel time from the candidate to any node in the part (minimax radius).
+
+        :returns: ``(best_candidate, radius)``
+        """
+        travel_times = self.travel_times
+        best_candidate = None
+        best_radius = float("inf")
+
+        for candidate in self.candidates[part]:
+            radius = max(travel_times[(candidate, node)] for node in self.parts[part])
+            if radius < best_radius:
+                best_radius = radius
+                best_candidate = candidate
+
+        return best_candidate, best_radius
+
     # instead of iterating over parts again, we can do it in update_flows function
     def update_part_flows(self, part_flows):
 
         for part in part_flows["in"]:
             self.parts[part] = set()
             self.candidates[part] = set()
-            self.centers[part] = None
-            self.radius[part] = None
             self.teams[part] = None
 
         for part in part_flows["out"]:
             self.parts.pop(part, None)
             self.candidates.pop(part, None)
-            self.centers.pop(part, None)
-            self.radius.pop(part, None)
             self.teams.pop(part, None)
 
-    def facility_assignment(self, part):
-        # might be cheaper if we calculate for only flow
-        save_candidates_radius = {}
-
-        for candidate in self.candidates[part]:
-            candidate_radius = max(
-                self.travel_times[(candidate, node)] for node in self.parts[part]
-            )
-            save_candidates_radius[candidate] = candidate_radius
-
-        best_candidate = min(
-            save_candidates_radius, key=save_candidates_radius.get
-        )  # center of the part
-        return best_candidate, save_candidates_radius[best_candidate]
-
-    # node_flows[target]["in"].add(node)
-
-    def update_flows(self, node_flows, part_flows, team_flips, candidate_flows):
+    def update_flows(self, flow, team_flips):
         """
-        Update the assignment for some nodes using the given flows.
-        """
-        self.update_part_flows(part_flows)
+        Update the assignment using the given Flow object.
 
-        for part, flow in node_flows.items():
-            if part not in part_flows["out"]:
-                # update part ndoes
+        :param flow: The Flow computed from the parent partition.
+        :type flow: :class:`~falcomchain.partition.flows.Flow`
+        :param team_flips: Maps district IDs to updated team counts.
+        :type team_flips: Dict
+        """
+        self.update_part_flows(flow.part_flows)
+
+        for part, node_flow in flow.node_flows.items():
+            if part not in flow.part_flows["out"]:
                 self.parts[part] = frozenset(
-                    (self.parts[part] - flow["out"]) | flow["in"]
+                    (self.parts[part] - node_flow["out"]) | node_flow["in"]
                 )
 
-                # update mapping. (not flow construction for now)
-                for node in flow["in"]:
+                for node in node_flow["in"]:
                     self.mapping[node] = part
 
                 self.teams[part] = team_flips[part]
 
-                # update candidates
+                cand_flow = flow.candidate_flows[part]
                 self.candidates[part] = frozenset(
-                    (self.candidates[part] - candidate_flows[part]["out"])
-                    | candidate_flows[part]["in"]
+                    (self.candidates[part] - cand_flow["out"]) | cand_flow["in"]
                 )
-
-                self.centers[part], self.radius[part] = self.facility_assignment(part)
 
         if len(self.mapping) != sum(len(self.parts[part]) for part in self.parts):
             parts_from_mapping = {part: set() for part in self.mapping.values()}
@@ -174,8 +167,8 @@ class Assignment(Mapping):
 
             raise Exception(
                 "mapping does not match parts.\n"
-                f"part flows {part_flows} \n"
-                f"node flows {node_flows} \n"
+                f"part flows {flow.part_flows} \n"
+                f"node flows {flow.node_flows} \n"
                 f"mapping {self.mapping} \n"
                 f"parts {self.parts}"
             )

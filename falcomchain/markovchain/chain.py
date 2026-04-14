@@ -29,6 +29,8 @@ from typing import Callable, Iterable, Optional, Union
 from falcomchain.constraints import Bounds, Validator
 from falcomchain.partition import Partition
 
+from .state import ChainState
+
 
 class MarkovChain:
     """
@@ -53,24 +55,26 @@ class MarkovChain:
         proposal: Callable,
         constraints: Union[Iterable[Callable], Validator, Iterable[Bounds], Callable],
         accept: Callable,
-        initial_state: Partition,
+        initial_state: ChainState,
         total_steps: int,
+        recorder=None,
     ) -> None:
         """
-        :param proposal: Function proposing the next state from the current state.
+        :param proposal: Function proposing the next ChainState from the current one.
         :type proposal: Callable
         :param constraints: A function with signature ``Partition -> bool`` determining whether
             the proposed next state is valid (passes all binary constraints). Usually
             this is a :class:`~falcomchain.constraints.Validator` class instance.
         :type constraints: Union[Iterable[Callable], Validator, Iterable[Bounds], Callable]
-        :param accept: Function accepting or rejecting the proposed state. In the most basic
-            use case, this always returns ``True``. But if the user wanted to use a
-            Metropolis-Hastings acceptance rule, this is where you would implement it.
+        :param accept: Acceptance function with signature ``(proposed: ChainState, current: ChainState) -> bool``.
+            Use ``always_accept`` for unconditional sampling or ``metropolis_hastings`` for MH.
         :type accept: Callable
-        :param initial_state: Initial :class:`falcomchain.partition.Partition` class.
-        :type initial_state: Partition
+        :param initial_state: Initial :class:`~falcomchain.markovchain.ChainState`.
+        :type initial_state: ChainState
         :param total_steps: Number of steps to run.
         :type total_steps: int
+        :param recorder: Optional :class:`~falcomchain.tree.snapshot.Recorder` for animation output.
+        :type recorder: Optional[Recorder]
 
         :returns: None
 
@@ -81,14 +85,14 @@ class MarkovChain:
         else:
             is_valid = Validator(constraints)
 
-        if not is_valid(initial_state):
+        if not is_valid(initial_state.partition):
             failed = [
                 constraint
                 for constraint in is_valid.constraints  # type: ignore
-                if not constraint(initial_state)
+                if not constraint(initial_state.partition)
             ]
             message = (
-                "The given initial_state is not valid according is_valid. "
+                "The given initial_state is not valid according to the constraints. "
                 "The failed constraints were: " + ",".join([f.__name__ for f in failed])
             )
             raise ValueError(message)
@@ -99,6 +103,11 @@ class MarkovChain:
         self.total_steps = total_steps
         self.initial_state = initial_state
         self.state = initial_state
+        self.recorder = recorder
+
+        # Attach recorder to state so proposal functions can access it
+        if recorder is not None:
+            self.state._recorder = recorder
 
     @property
     def constraints(self) -> Validator:
@@ -135,11 +144,11 @@ class MarkovChain:
         else:
             is_valid = Validator(constraints)
 
-        if not is_valid(self.initial_state):
+        if not is_valid(self.initial_state.partition):
             failed = [
                 constraint
                 for constraint in is_valid.constraints  # type: ignore
-                if not constraint(self.initial_state)
+                if not constraint(self.initial_state.partition)
             ]
             message = (
                 "The given initial_state is not valid according to the new constraints. "
@@ -153,9 +162,6 @@ class MarkovChain:
         """
         Resets the Markov chain iterator.
 
-        This method is called when an iterator is required for a container. It sets the
-        counter to 0 and resets the state to the initial state.
-
         :returns: Returns itself as an iterator object.
         :rtype: MarkovChain
         """
@@ -163,18 +169,17 @@ class MarkovChain:
         self.state = self.initial_state
         return self
 
-    def __next__(self) -> Optional[Partition]:
+    def __next__(self) -> Optional[ChainState]:
         """
         Advances the Markov chain to the next state.
 
-        This method is called to get the next item in the iteration.
-        It proposes the next state and moves to it if that state is
-        valid according to the constraints and if accepted by the
-        acceptance function. If the total number of steps has been
-        reached, it raises a StopIteration exception.
+        Proposes a new ChainState, validates it against the constraints,
+        then calls the accept function with ``(proposed, current)`` to
+        decide whether to move. Always yields the current state (accepted
+        or unchanged) at each step.
 
-        :returns: The next state of the Markov chain.
-        :rtype: Optional[Partition]
+        :returns: The current ChainState after this step.
+        :rtype: Optional[ChainState]
 
         :raises StopIteration: If the total number of steps has been reached.
         """
@@ -184,15 +189,29 @@ class MarkovChain:
 
         while self.counter < self.total_steps:
             proposed_next_state = self.proposal(self.state)
-            # Erase the parent of the parent, to avoid memory leak
-            if self.state is not None:
-                self.state.parent = None
+            parent_energy = self.state.energy
 
-            if self.is_valid(proposed_next_state):
-                if self.accept(proposed_next_state):
+            # Drop the grandparent reference to avoid unbounded memory growth
+            if self.state.partition is not None:
+                self.state.partition.parent = None
+
+            accepted = False
+            if self.is_valid(proposed_next_state.partition):
+                if self.accept(proposed_next_state, self.state):
                     self.state = proposed_next_state
-                self.counter += 1
-                return self.state
+                    accepted = True
+
+            if self.recorder is not None:
+                self.recorder.record_step(
+                    self.state,
+                    accepted=accepted,
+                    parent_energy=parent_energy,
+                )
+
+            self.counter += 1
+            return self.state
+        if self.recorder is not None:
+            self.recorder.close()
         raise StopIteration
 
     def __len__(self) -> int:

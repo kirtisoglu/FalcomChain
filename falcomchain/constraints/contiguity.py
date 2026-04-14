@@ -1,5 +1,6 @@
-import random
 from heapq import heappop, heappush
+
+from falcomchain.random import rng
 from itertools import count
 from typing import Any, Callable, Dict, Set
 
@@ -123,7 +124,7 @@ def single_flip_contiguous(partition) -> bool:
         if not old_neighbors:
             return False
 
-        start_neighbor = random.choice(old_neighbors)
+        start_neighbor = rng.choice(old_neighbors)
 
         # Check if all old neighbors in the same assignment are still reachable.
         connected = are_reachable(

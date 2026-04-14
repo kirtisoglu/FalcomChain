@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Type, Union
 
 import pandas
 
-from ..partition.flows import compute_node_flows, on_flow
+from ..partition.flows import on_flow
 
 
 class DataTally:

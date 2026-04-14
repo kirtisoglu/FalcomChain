@@ -20,8 +20,8 @@ def test_save_tree_class(spanningtree_with_forced_root):
 
     tree = spanningtree_with_forced_root.graph
 
-    path_1 = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_tree.pkl"
-    path_2 = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_tree_attributes.pkl"
+    path_1 = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_tree.pkl"
+    path_2 = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_tree_attributes.pkl"
     
     # save them using the function that will be tested
     save_tree_class(tree, path_1, path_2)
@@ -57,8 +57,8 @@ def test_load_tree_class(spanningtree_with_forced_root):
 
     tree = spanningtree_with_forced_root
 
-    path_1 = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_tree.pkl"
-    path_2 = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_tree_attributes.pkl"
+    path_1 = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_tree.pkl"
+    path_2 = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_tree_attributes.pkl"
 
     # They are already saved by the previous test function. Load them back.
     loaded_tree = load_tree_class(path_1, path_2)
@@ -80,7 +80,7 @@ def test_load_tree_class(spanningtree_with_forced_root):
 def test_save_pickle(geodata_without_candidates):
 
     gdf = geodata_without_candidates
-    path = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_geodata_no_candidates.pkl"
+    path = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_geodata_no_candidates.pkl"
     
     # save it using the function that will be tested
     save_pickle(gdf, path)
@@ -98,7 +98,7 @@ def test_save_pickle(geodata_without_candidates):
 def test_load_pickle(geodata_without_candidates):
     
     gdf = geodata_without_candidates
-    path = "/Users/kirtisoglu/Documents/Documents/GitHub/Allocation-of-Primary-Care-Centers-in-Chicago/tests/test_data/test_geodata_no_candidates.pkl"
+    path = "/Users/kirtisoglu/Documents/Documents/GitHub/FalcomChain/tests/test_data/test_geodata_no_candidates.pkl"
     
     # it is already saved with the previous test function. Load it directly
     loaded_gdf = load_pickle(path)

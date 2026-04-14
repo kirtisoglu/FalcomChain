@@ -13,7 +13,6 @@ Dependencies:
 """
 
 import math
-import random
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import networkx
@@ -21,21 +20,35 @@ import networkx
 from .graph import Graph
 from falcomchain.markovchain import polsby_popper
 from falcomchain.partition import Partition
+from falcomchain.random import rng
 
 
 class Grid:
     """
-    The :class:`Grid` class creates a grid with pre-specified attributes and attribute values.
-    It is useful for running little experiments with Falcomchain without needing to do any data
-    processing or cleaning to get started.
+    Synthetic grid graph generator for testing and demonstrations.
+
+    .. note::
+       This is a **testing/demo utility**, not a primary entry point.
+       For production use cases, build your graph with
+       :meth:`Graph.from_geodataframe` (geographic data) or
+       :meth:`Graph.from_data` (raw data).
+
+    Creates an m x n grid graph with all required FalcomChain node attributes
+    (demand, area, C_X, C_Y, candidate) plus boundary information.
 
     Example usage::
 
-        grid = Grid((10,10))
+        grid = Grid(dimensions=(10, 10), num_candidates=20, density="uniform")
+        graph = grid.graph  # the underlying Graph object
 
-    The nodes of ``grid.graph`` are labelled by numbers from 1 to m x n where m, n are dimensions.
-    Node attributes: area, C_X, C_Y, demand, candidate
-    Edge attributes: shared_perimeter
+    :param dimensions: (rows, cols) grid size.
+    :param num_candidates: Number of nodes randomly selected as facility candidates.
+    :param density: Demand pattern: 'uniform', 'opposite', or 'corners'.
+    :param threshold: For non-uniform density, threshold tuple.
+    :param candidate_ignore: Optional region to exclude from candidate sampling.
+
+    Node attributes set: demand, area, C_X, C_Y, candidate, boundary_node, boundary_perim.
+    Edge attributes set: shared_perim.
     """
 
     def __init__(
@@ -134,7 +147,7 @@ class Grid:
             ignore = {node for node in nodes if node[0] < x_0 or node[1] < y_0}
             nodes = nodes - ignore
 
-        candidates = random.sample(list(nodes), k=self.num_candidates)
+        candidates = rng.sample(list(nodes), k=self.num_candidates)
 
         for node in self.graph.nodes:
             if node in candidates:

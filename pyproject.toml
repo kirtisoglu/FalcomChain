@@ -5,21 +5,71 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "falcomchain"
 version = "0.1.0"
-description = "MCMC library for capacitated facility location via graph partitioning"
-requires-python = ">=3.10"
+description = "MCMC library for hierarchical capacitated facility location and districting problems"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+authors = [
+    { name = "Hemanshu Kaul" },
+    { name = "Alaittin Kırtışoğlu", email = "kirtisoglu@hawk.iit.edu" },
+]
+keywords = ["MCMC", "facility location", "districting", "graph partitioning", "redistricting"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+requires-python = ">=3.12"
 dependencies = [
-    "networkx>=3.0",
-    "geopandas>=0.14",
-    "shapely>=2.0",
-    "pandas>=2.0",
-    "numpy>=1.26",
+    "networkx>=3.4,<4",
+    "geopandas>=0.14,<2",
+    "shapely>=2.0,<3",
+    "pandas>=2.0,<3",
+    "numpy>=1.26,<3",
     "tqdm>=4.60",
 ]
 
+[project.urls]
+Homepage = "https://github.com/kirtisoglu/FalcomChain"
+Documentation = "https://falcomchain.readthedocs.io"
+Repository = "https://github.com/kirtisoglu/FalcomChain"
+Issues = "https://github.com/kirtisoglu/FalcomChain/issues"
+Changelog = "https://github.com/kirtisoglu/FalcomChain/blob/main/CHANGELOG.md"
+
 [tool.setuptools.packages.find]
 include = ["falcomchain*"]
+exclude = ["experiments*", "tests*", "data*", "not_used*", "docs*"]
+
+[tool.setuptools.package-data]
+falcomchain = ["py.typed"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*.ipynb", "*.pkl"]
 
 [project.optional-dependencies]
 candidates = [
     "scipy>=1.10",
 ]
+docs = [
+    "sphinx>=7",
+    "sphinx-rtd-theme>=2",
+    "myst-parser>=2",
+    "myst-nb>=1",          # render Jupyter notebooks as docs pages
+    "ipykernel>=6",        # required by myst-nb to execute notebooks
+]
+dev = [
+    "pytest>=8",
+    "sphinx>=7",
+    "sphinx-rtd-theme>=2",
+    "myst-parser>=2",
+    "myst-nb>=1",
+    "ipykernel>=6",
+    "jupyter>=1",          # for editing notebooks locally
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::UserWarning"]

@@ -1,7 +1,8 @@
-import random
 from collections import namedtuple
 from functools import partial
 from typing import Optional, Tuple
+
+from falcomchain.random import rng
 
 from falcomchain.partition import Partition
 from falcomchain.tree.tree import (
@@ -11,6 +12,12 @@ from falcomchain.tree.tree import (
     bipartition_tree,
     capacitated_recursive_tree,
 )
+
+# imported lazily to avoid circular imports at module load time
+def _get_chain_state_cls():
+    from falcomchain.markovchain.state import ChainState
+    from falcomchain.markovchain.energy import compute_energy
+    return ChainState, compute_energy
 
 
 class MetagraphError(Exception):
@@ -32,92 +39,179 @@ class ValueWarning(UserWarning):
 
 
 def hierarchical_recom(
-    partition: Partition,
+    state,
     epsilon: float,
     demand_target: float,
     density: Optional[float] = None,
-    snapshot: bool = True,
-) -> Partition:
+):
     """
-    Proposes a new partition via two-level hierarchical ReCom.
+    Proposes a new ChainState via two-level hierarchical ReCom.
 
-    At the upper level, two adjacent super-districts are selected from the supergraph
-    and merged into a single superdistrict. At the lower level, the merged region is
-    re-split using a capacitated spanning tree such that the total team capacity of the
-    new districts equals the total capacity of the merged superdistrict.
+    At the upper level, the supergraph is recursively partitioned into superdistricts.
+    One superdistrict is chosen uniformly at random and its merged region is re-split
+    by recursive partitioning at the base level. Recording (if enabled) is driven by
+    the ``Recorder`` attached to the chain via ``state._recorder``.
 
-    :param partition: The current partition.
-    :type partition: Partition
-    :param epsilon: Maximum relative demand deviation allowed, as a fraction of demand_target.
-    :type epsilon: float
-    :param demand_target: Target demand per district.
-    :type demand_target: float
-    :param density: Optional density parameter passed to the tree method.
-    :type density: float, optional
-    :param snapshot: If True, saves tree snapshots for debugging. Defaults to True.
-    :type snapshot: bool
-    :returns: The new partition after the hierarchical flip.
-    :rtype: Partition
+    :param state: The current ChainState.
+    :param epsilon: Maximum relative demand deviation allowed.
+    :param demand_target: Target demand per team (d_bar).
+    :param density: Optional density parameter.
+    :returns: The proposed ChainState.
     """
+    ChainState, compute_energy = _get_chain_state_cls()
+    partition = state.partition
+    rec = getattr(state, "_recorder", None)
+
+    # Signal start of a new step to the recorder
+    if rec is not None:
+        rec.begin_step()
 
     method = partial(
         capacitated_recursive_tree,
         capacity_level=partition.capacity_level,
         density=density,
+        recorder=rec,
     )
 
-    # UPPER LEVEL: selecting districts from supergraph to merge
+    # ---- UPPER LEVEL: Recursive partitioning of supergraph G² ----
+    # Paper Algorithm 2, line 2: partition G^2 into superdistricts via
+    # RecursivePartitioning. Falls back to single bipartition on small supergraphs
+    # where the recursive approach can fail (e.g., teams don't split cleanly).
+    total_teams = sum(partition.teams.values())
 
-    all_teams = sum(team for team in partition.teams.values())
+    if rec is not None:
+        rec.begin_level("supergraph", partition=partition)
 
-    ##superflip = method(
-    ##    graph=partition.supergraph, n_teams=all_teams, supergraph=True
-    ##)
-    acut_object = bipartition_tree(
-        graph=partition.supergraph.copy(),
-        demand_target=1500,
-        capacity_level=partition.capacity_level,
-        n_teams=sum(partition.teams.values()),
-        epsilon=epsilon / 2,
-        two_sided=False,
-        supergraph=True,
-        density=False,
-        snapshot=snapshot,
-        max_attempts=10,
-        iteration=partition.step,
-    )
+    try:
+        super_flip = capacitated_recursive_tree(
+            graph=partition.supergraph.copy(),
+            n_teams=total_teams,
+            demand_target=demand_target,
+            epsilon=epsilon,
+            capacity_level=partition.capacity_level,
+            density=density,
+            supergraph=True,
+            iteration=partition.step,
+            recorder=rec,
+        )
+        log_super_ratio = super_flip.log_proposal_ratio
 
-    # LOWER LEVEL: resplitting merged districts
-    new_demand_target = acut_object.demand / acut_object.assigned_teams
-    # print("demand in superdistrict", acut_object.demand)
+        # Invert super_flip: superdistrict_id -> set of supergraph nodes
+        super_parts = {}
+        for sg_node, super_id in super_flip.flips.items():
+            super_parts.setdefault(super_id, set()).add(sg_node)
 
-    merge = frozenset(acut_object.subnodes)
-    superflip = Flip(merged_ids=merge, super_cut_object=acut_object)
+        # Pick one superdistrict uniformly at random (Algorithm 1 line 3)
+        chosen_super_id = rng.choice(list(super_parts.keys()))
+        merge = frozenset(super_parts[chosen_super_id])
+        super_teams = super_flip.team_flips[chosen_super_id]
+        super_demand = sum(
+            partition.supergraph.nodes[n].get("demand", 0) for n in merge
+        )
+    except RuntimeError:
+        # Fallback for small supergraphs: single bipartition extraction
+        acut_object, log_super_ratio = bipartition_tree(
+            graph=partition.supergraph.copy(),
+            demand_target=demand_target,
+            capacity_level=partition.capacity_level,
+            n_teams=total_teams,
+            epsilon=epsilon,
+            two_sided=False,
+            supergraph=True,
+            density=False,
+            max_attempts=100,
+            iteration=partition.step,
+            recorder=rec,
+        )
+        merge = frozenset(acut_object.subnodes)
+        super_teams = acut_object.assigned_teams
+        super_demand = acut_object.demand
 
-    subgraph = partition.graph.graph.subgraph(
-        set.union(*(set(partition.parts[part]) for part in merge))
-    )
+    if rec is not None:
+        super_centers = {}
+        if state.super_facility:
+            super_centers = dict(state.super_facility.centers)
+        rec.end_level(centers=super_centers)
+
+    superflip = Flip(merged_ids=merge)
+
+    merged_base_nodes = set.union(*(set(partition.parts[part]) for part in merge))
+    subgraph = partition.graph.graph.subgraph(merged_base_nodes)
+
+    if rec is not None:
+        rec.record_select(
+            supergraph=partition.supergraph,
+            selected_superdistricts=merge,
+            merged_base_nodes=merged_base_nodes,
+            partition=partition,
+        )
+
+    # ---- LOWER LEVEL: Re-partition base subgraph H ----
+    new_demand_target = super_demand / super_teams if super_teams else demand_target
 
     max_id = max(district for district in partition.parts)
     sub_assignments = {
         node: partition.assignment.mapping[node] for node in subgraph.nodes
     }
 
+    if rec is not None:
+        rec.begin_level("base")
+
     flip = method(
         graph=subgraph,
-        n_teams=int(acut_object.assigned_teams),
+        n_teams=int(super_teams),
         merged_ids=set(merge.copy()),
         assignments=sub_assignments,
         max_id=max_id,
         demand_target=new_demand_target,
         epsilon=epsilon,
-        snapshot=snapshot,
-        debt=(acut_object.demand - acut_object.assigned_teams * 1500),
+        debt=(super_demand - super_teams * demand_target),
         iteration=partition.step,
     )
     flip = flip.add_merged_ids(merge)
 
-    return partition.perform_flip(flipp=flip, superflipp=superflip)
+    # Pure Boltzmann acceptance: ignore forward proposal density since we
+    # don't compute the reverse term (see GerryChain, Cannon et al. 2022).
+    # Setting log_proposal_ratio=0 gives alpha = exp(-beta * delta_E).
+    # The forward ratio is still stored for diagnostics/future reversible variant.
+    forward_log_proposal = log_super_ratio + flip.log_proposal_ratio
+
+    proposed_partition = partition.perform_flip(flipp=flip, superflipp=superflip)
+
+    # state.next() will use state.energy_fn if set, otherwise the energy arg below.
+    # We default to compute_energy when no custom energy_fn is configured.
+    if state.energy_fn is None:
+        # Need to first build the state to compute default energy via FacilityAssignment
+        proposed_state = state.next(
+            partition=proposed_partition,
+            energy=0.0,
+            log_proposal_ratio=0.0,
+            feasible=True,
+        )
+        proposed_state.energy = compute_energy(proposed_state)
+    else:
+        proposed_state = state.next(
+            partition=proposed_partition,
+            energy=0.0,
+            log_proposal_ratio=0.0,
+            feasible=True,
+        )
+
+    if rec is not None:
+        # Level-1 facility centers
+        level1_centers = {}
+        if proposed_state.facility:
+            level1_centers = dict(proposed_state.facility.centers)
+        rec.end_level(centers=level1_centers)
+
+    # ---- ACCEPT/REJECT ----
+    if rec is not None:
+        rec.record_accept_reject(
+            proposed_state=proposed_state,
+            current_state=state,
+            accepted=True,  # tentative — MarkovChain sets final value
+        )
+    return proposed_state
 
 
 def recom(  # Note: recomb is called for each state of the chain. Parameters must be static for the states. (should we cache some of them in Partition?)
@@ -161,7 +255,7 @@ def recom(  # Note: recomb is called for each state of the chain. Parameters mus
     while len(bad_district_pairs) < tot_pairs:
         try:
             while True:
-                edge = random.choice(tuple(partition["cut_edges"]))
+                edge = rng.choice(tuple(partition["cut_edges"]))
                 # Need to sort the tuple so that the order is consistent in the bad_district_pairs set
                 part_one, part_two = (
                     partition.assignment.mapping[edge[0]],
@@ -222,8 +316,8 @@ def propose_chunk_flip(partition: Partition) -> Partition:
     """
     flips = dict()
 
-    edge = random.choice(tuple(partition["cut_edges"]))
-    index = random.choice((0, 1))
+    edge = rng.choice(tuple(partition["cut_edges"]))
+    index = rng.choice((0, 1))
 
     flipped_node = edge[index]
 
@@ -252,8 +346,8 @@ def propose_random_flip(partition: Partition) -> Partition:
     """
     if len(partition["cut_edges"]) == 0:
         return partition
-    edge = random.choice(tuple(partition["cut_edges"]))
-    index = random.choice((0, 1))
+    edge = rng.choice(tuple(partition["cut_edges"]))
+    index = rng.choice((0, 1))
     flipped_node, other_node = edge[index], edge[1 - index]
     flip = {flipped_node: partition.assignment.mapping[other_node]}
     return partition.flip(flip)

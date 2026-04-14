@@ -1,6 +1,7 @@
 import math
-import random
 from typing import Any, Callable, List, Union
+
+from falcomchain.random import rng
 
 from tqdm import tqdm
 
@@ -140,7 +141,7 @@ class SingleMetricOptimizer:
             if self._is_improvement(part_score, prev_score):
                 return True
             else:
-                return random.random() < p
+                return rng.random() < p
 
         return tilted_acceptance_function
 
@@ -194,7 +195,7 @@ class SingleMetricOptimizer:
             beta = beta_function(part.step)
             if self._maximize:
                 score_delta *= -1
-            return random.random() < math.exp(-beta * beta_magnitude * score_delta)
+            return rng.random() < math.exp(-beta * beta_magnitude * score_delta)
 
         return simulated_annealing_acceptance_function
 

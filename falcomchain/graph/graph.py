@@ -23,6 +23,7 @@ from networkx.readwrite import json_graph
 
 from .adjacency import neighbors
 from .geo import GeometryError, invalid_geometries, reprojected
+from .schema import validate_graph
 
 
 def json_serialize(input_object: Any) -> Optional[int]:
@@ -71,6 +72,168 @@ class Graph(networkx.Graph):
         """
         g = cls(graph)
         return g
+
+    @classmethod
+    def create(cls, source, **kwargs) -> "Graph":
+        """
+        Smart constructor that dispatches based on the type of ``source``.
+
+        - ``str`` (filename ending in .shp, .geojson, .gpkg, etc.) -> ``from_file``
+        - ``geopandas.GeoDataFrame`` -> ``from_geodataframe``
+        - ``networkx.Graph`` -> ``from_networkx``
+        - ``dict`` with key ``edges`` -> ``from_data``
+        - existing ``Graph`` -> returned as-is
+
+        :param source: Input data of various types.
+        :param kwargs: Forwarded to the underlying constructor.
+
+        :returns: A Graph object.
+        :rtype: Graph
+
+        Example::
+
+            graph = Graph.create("districts.shp", demand_col="POP")
+            graph = Graph.create(my_geodataframe, candidate_col="is_candidate")
+            graph = Graph.create({"edges": [(1,2),(2,3)], "demand": {1:10, 2:20, 3:30},
+                                  "candidates": [1, 3]})
+        """
+        if isinstance(source, cls):
+            return source
+
+        if isinstance(source, str):
+            return cls.from_file(source, **kwargs)
+
+        try:
+            import geopandas as gp
+            if isinstance(source, gp.GeoDataFrame):
+                return cls.from_geodataframe(source, **kwargs)
+        except ImportError:
+            pass
+
+        if isinstance(source, networkx.Graph):
+            g = cls.from_networkx(source)
+            if kwargs.get("validate", True):
+                validate_graph(g, strict=True)
+            return g
+
+        if isinstance(source, dict) and "edges" in source:
+            return cls.from_data(**source, **kwargs)
+
+        raise TypeError(
+            f"Cannot build a Graph from {type(source).__name__}. "
+            "Use a filename, GeoDataFrame, networkx.Graph, or dict with 'edges' key."
+        )
+
+    @classmethod
+    def from_data(
+        cls,
+        edges,
+        demand,
+        candidates=None,
+        coordinates=None,
+        area=None,
+        extra_attributes=None,
+        validate: bool = True,
+    ) -> "Graph":
+        """
+        Build a Graph from raw data dictionaries. The recommended entry point
+        for users who don't have a GeoDataFrame.
+
+        :param edges: Iterable of (u, v) tuples defining the adjacency.
+        :param demand: Dict mapping node -> demand value.
+        :param candidates: Iterable of node IDs that are facility candidates,
+            or dict node -> bool. Defaults to no candidates.
+        :param coordinates: Dict mapping node -> (x, y). Defaults to (0, 0).
+        :param area: Dict mapping node -> area. Defaults to 1.0.
+        :param extra_attributes: Dict of {attribute_name: {node: value}} for
+            additional node attributes (e.g., custom features).
+
+        :returns: A Graph with node attributes ``demand``, ``area``, ``candidate``,
+            ``C_X``, ``C_Y``, plus any extras.
+        :rtype: Graph
+
+        Example::
+
+            graph = Graph.from_data(
+                edges=[(1, 2), (2, 3), (3, 1)],
+                demand={1: 100, 2: 150, 3: 80},
+                candidates=[1, 3],  # nodes 1 and 3 can host facilities
+                coordinates={1: (0, 0), 2: (1, 0), 3: (0.5, 1)},
+            )
+        """
+        g = cls()
+        g.add_edges_from(edges)
+
+        # Ensure all nodes referenced in demand also exist
+        for node in demand:
+            if node not in g:
+                g.add_node(node)
+
+        # Normalize candidates to a set
+        if candidates is None:
+            candidate_set = set()
+        elif isinstance(candidates, dict):
+            candidate_set = {n for n, v in candidates.items() if v}
+        else:
+            candidate_set = set(candidates)
+
+        for node in g.nodes:
+            g.nodes[node]["demand"] = float(demand.get(node, 0))
+            g.nodes[node]["area"] = float((area or {}).get(node, 1.0))
+            g.nodes[node]["candidate"] = 1 if node in candidate_set else 0
+            x, y = (coordinates or {}).get(node, (0.0, 0.0))
+            g.nodes[node]["C_X"] = float(x)
+            g.nodes[node]["C_Y"] = float(y)
+
+        if extra_attributes:
+            for attr_name, attr_dict in extra_attributes.items():
+                for node, value in attr_dict.items():
+                    if node in g:
+                        g.nodes[node][attr_name] = value
+
+        if validate:
+            validate_graph(g, strict=True)
+
+        return g
+
+    def set_partition(self, assignment, teams_per_district=None, capacity_level=None):
+        """
+        Write partition state into the graph as node and graph attributes.
+        After calling this, the graph IS the partition — you can serialize
+        it as a single artifact.
+
+        :param assignment: Dict mapping node -> district ID.
+        :param teams_per_district: Optional dict district -> team count.
+        :param capacity_level: Optional max teams per district.
+        """
+        for node, dist_id in assignment.items():
+            if node in self:
+                self.nodes[node]["district"] = dist_id
+
+        if teams_per_district is not None:
+            self.graph["teams_per_district"] = dict(teams_per_district)
+        if capacity_level is not None:
+            self.graph["capacity_level"] = int(capacity_level)
+
+    def get_partition_data(self):
+        """
+        Read partition state from graph attributes. Returns None if no
+        ``district`` attribute is present.
+
+        :returns: Dict with ``assignment``, ``teams_per_district``,
+            ``capacity_level``, or None if no partition data exists.
+        """
+        sample_node = next(iter(self.nodes), None)
+        if sample_node is None or "district" not in self.nodes[sample_node]:
+            return None
+
+        assignment = {n: self.nodes[n]["district"] for n in self.nodes
+                      if "district" in self.nodes[n]}
+        return {
+            "assignment": assignment,
+            "teams_per_district": self.graph.get("teams_per_district", {}),
+            "capacity_level": self.graph.get("capacity_level"),
+        }
 
     @classmethod
     def from_json(cls, json_file: str) -> "Graph":
@@ -122,9 +285,13 @@ class Graph(networkx.Graph):
         cls,
         filename: str,
         adjacency: str = "rook",
+        demand_col: str = "demand",
+        candidate_col: str = "candidate",
+        area_col: Optional[str] = None,
         cols_to_add: Optional[List[str]] = None,
         reproject: bool = False,
         ignore_errors: bool = False,
+        validate: bool = True,
     ) -> "Graph":
         """
         Create a :class:`Graph` from a shapefile (or GeoPackage, or GeoJSON, or
@@ -163,9 +330,13 @@ class Graph(networkx.Graph):
         graph = cls.from_geodataframe(
             df,
             adjacency=adjacency,
+            demand_col=demand_col,
+            candidate_col=candidate_col,
+            area_col=area_col,
             cols_to_add=cols_to_add,
             reproject=reproject,
             ignore_errors=ignore_errors,
+            validate=validate,
         )
         graph.graph["crs"] = df.crs.to_json()
         return graph
@@ -175,10 +346,14 @@ class Graph(networkx.Graph):
         cls,
         dataframe: pd.DataFrame,
         adjacency: str = "rook",
+        demand_col: str = "demand",
+        candidate_col: str = "candidate",
+        area_col: Optional[str] = None,
         cols_to_add: Optional[List[str]] = None,
         reproject: bool = False,
         ignore_errors: bool = False,
         crs_override: Optional[Union[str, int]] = None,
+        validate: bool = True,
     ) -> "Graph":
         """
         Creates the adjacency :class:`Graph` of geometries described by `dataframe`.
@@ -197,26 +372,27 @@ class Graph(networkx.Graph):
         GeoDataFrame's current coordinate reference system. This option is for users who
         have a preferred CRS they would like to use.
 
-        :param dataframe: The GeoDateFrame to convert
+        :param dataframe: The GeoDataFrame to convert.
         :type dataframe: :class:`geopandas.GeoDataFrame`
-        :param adjacency: The adjacency type to use ("rook" or "queen").
-            Default is "rook".
-        :type adjacency: str, optional
-        :param cols_to_add: The names of the columns that you want to
-            add to the graph as node attributes. Default is None.
-        :type cols_to_add: Optional[List[str]], optional
-        :param reproject: Whether to reproject to a UTM projection before
-            creating the graph. Default is ``False``.
-        :type reproject: bool, optional
-        :param ignore_errors: Whether to ignore all invalid geometries and
-            attept to create the graph anyway. Default is ``False``.
-        :type ignore_errors: bool, optional
-        :param crs_override: Value to override the CRS of the GeoDataFrame.
-            Default is None.
-        :type crs_override: Optional[Union[str,int]], optional
+        :param adjacency: The adjacency type to use ("rook" or "queen"). Default "rook".
+        :param demand_col: Name of the column holding demand values. The column
+            is renamed to ``demand`` on the resulting graph. Default "demand".
+        :param candidate_col: Name of the column holding facility candidate flags
+            (0/1 or True/False). Renamed to ``candidate``. Default "candidate".
+        :param area_col: Name of the column holding pre-computed areas. If None,
+            areas are computed from geometry. Default None.
+        :param cols_to_add: Additional columns to copy as node attributes.
+        :param reproject: Reproject to a UTM projection before creating the graph.
+        :param ignore_errors: Ignore invalid geometries.
+        :param crs_override: Override the CRS of the GeoDataFrame.
+        :param validate: Verify required FalcomChain attributes after construction.
 
-        :returns: The adjacency graph of the geometries from `dataframe`.
+        :returns: A Graph with required attributes ``demand`` and ``candidate``,
+            plus computed ``area``, ``boundary_node``, ``boundary_perim``, and
+            edge ``shared_perim``.
         :rtype: Graph
+        :raises SchemaValidationError: If ``validate=True`` and required
+            attributes are missing or invalid.
         """
         # Validate geometries before reprojection
         if not ignore_errors:
@@ -258,11 +434,34 @@ class Graph(networkx.Graph):
         # Add "exterior" perimeters to the boundary nodes
         add_boundary_perimeters(graph, df.geometry)
 
-        # Add area data to the nodes
-        areas = df.geometry.area.to_dict()
-        networkx.set_node_attributes(graph, name="area", values=areas)
+        # Add area data to the nodes (computed from geometry, unless overridden)
+        if area_col is not None and area_col in df.columns:
+            networkx.set_node_attributes(graph, name="area", values=df[area_col].to_dict())
+        else:
+            areas = df.geometry.area.to_dict()
+            networkx.set_node_attributes(graph, name="area", values=areas)
 
-        graph.add_data(df, columns=cols_to_add)
+        # Always include the schema-required columns plus user extras
+        required_cols = []
+        rename_map = {}
+        if demand_col in df.columns:
+            required_cols.append(demand_col)
+            if demand_col != "demand":
+                rename_map[demand_col] = "demand"
+        if candidate_col in df.columns:
+            required_cols.append(candidate_col)
+            if candidate_col != "candidate":
+                rename_map[candidate_col] = "candidate"
+
+        all_cols = list(set(required_cols + (cols_to_add or [])))
+        if all_cols:
+            graph.add_data(df, columns=all_cols)
+
+        # Rename columns to schema-canonical names if needed
+        for src, dst in rename_map.items():
+            for n in graph.nodes:
+                if src in graph.nodes[n]:
+                    graph.nodes[n][dst] = graph.nodes[n].pop(src)
 
         if crs_override is not None:
             df.set_crs(crs_override, inplace=True)
@@ -277,6 +476,9 @@ class Graph(networkx.Graph):
             graph.graph["crs"] = None
         else:
             graph.graph["crs"] = df.crs.to_json()
+
+        if validate:
+            validate_graph(graph, strict=True)
 
         return graph
 

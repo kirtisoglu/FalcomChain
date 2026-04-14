@@ -21,7 +21,7 @@ Dependencies:
 Last Updated: 8 October 2024
 """
 
-import random
+import math
 from collections import Counter, deque, namedtuple
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
@@ -29,8 +29,9 @@ from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 import networkx as nx
 from networkx.algorithms import tree
 
+from falcomchain.random import rng
+
 from falcomchain.helper import save_pickle
-from falcomchain.tree import export_district_frame, export_tree
 from falcomchain.tree.errors import (
     BalanceError,
     BipartitionWarning,
@@ -68,55 +69,68 @@ class SpanningTree:
     __slots__ = (
         "graph",
         "root",
-        "ideal_demand",
-        "n_teams",
-        "capacity_level",
-        "epsilon",
         "successors",
         "total_demand",
         "supertree",
-        "two_sided",
         "tot_candidates",
+        "candidate_nodes",
+        "params",
     )
 
     def __init__(
         self,
         graph,
-        ideal_demand,
-        epsilon,
-        capacity_level,
-        n_teams: int,
-        two_sided: Optional[bool] = False,
+        params: "CutParams",
         supergraph: Optional[bool] = False,
     ) -> None:
 
-        self.supertree = supergraph  # remove and use supergraph
+        self.supertree = supergraph
         self.graph = graph
+        self.params = params
+        # Prefer non-leaf nodes for the root, but fall back to any node
+        # (needed for small residual graphs during recursive partitioning)
+        internal_nodes = [n for n in self.graph.nodes if self.graph.degree(n) > 1]
+        if internal_nodes:
+            self.root = rng.choice(internal_nodes)
+        else:
+            self.root = rng.choice(list(self.graph.nodes))
 
-        self.ideal_demand = ideal_demand
-        self.root = random.choice(
-            list(node for node in self.graph.nodes if self.graph.degree(node) > 1)
-        )
-        self.n_teams, self.capacity_level, self.epsilon = (
-            n_teams,
-            capacity_level,
-            epsilon,
-        )
-        self.two_sided = two_sided
-
-        if self.supertree == True:
+        if self.supertree:
+            self.candidate_nodes = frozenset()
             accumulation_columns = {"demand", "area", "n_teams"}
         else:
-            self.tot_candidates = sum(
-                1
-                for node in self.graph.nodes
+            # Record original candidate nodes BEFORE accumulation overwrites the field
+            self.candidate_nodes = frozenset(
+                node for node in self.graph.nodes
                 if self.graph.nodes[node]["candidate"] == 1
             )
+            self.tot_candidates = len(self.candidate_nodes)
             accumulation_columns = {"demand", "area", "candidate"}
 
         self.successors = self.find_successors()
         accumulate_tree(self, accumulation_columns)
         self.total_demand = self.graph.nodes[self.root]["demand"]
+
+    # convenience shorthands so callers don't have to write h.params.epsilon etc.
+    @property
+    def ideal_demand(self):
+        return self.params.ideal_demand
+
+    @property
+    def epsilon(self):
+        return self.params.epsilon
+
+    @property
+    def capacity_level(self):
+        return self.params.capacity_level
+
+    @property
+    def n_teams(self):
+        return self.params.n_teams
+
+    @property
+    def two_sided(self):
+        return self.params.two_sided
 
     def find_successors(self) -> Dict:
         return {a: b for a, b in nx.bfs_successors(self.graph, self.root)}
@@ -183,6 +197,65 @@ class SpanningTree:
         }
         return nodes
 
+    def psi(self, node) -> float:
+        """
+        Candidate-awareness score for the subtree rooted at ``node``:
+
+            psi(T_u) = phi(u) * exp(-gamma * r(T_u))
+
+        where phi(u) is the facility indicator (number of candidates in subtree)
+        and r(T_u) = min_{f in F_H ∩ T_u} e(f, T_u) is the demand radius —
+        the minimum eccentricity over all facility candidates in T_u.
+
+        When gamma = 0 this reduces to phi(u) (pure feasibility score).
+        When travel_times is None, uses 1/phi as a proxy for r(T_u).
+        """
+        phi = self.graph.nodes[node]["candidate"]  # accumulated candidate count
+        if phi == 0:
+            return 0.0
+
+        # Allow custom psi function
+        if self.params.psi_fn is not None:
+            r = self._demand_radius(node)
+            return self.params.psi_fn(phi, self.params.gamma, r)
+
+        gamma = self.params.gamma
+        if gamma == 0.0:
+            return float(phi)
+
+        r = self._demand_radius(node)
+        return phi * math.exp(-gamma * r)
+
+    def _demand_radius(self, node) -> float:
+        """
+        Compute r(T_u) = min_{f in F ∩ T_u} e(f, T_u) where
+        e(f, T_u) = max_{v in T_u} dist(f, v).
+
+        Falls back to 1/phi when travel_times is not available.
+        """
+        travel_times = self.params.travel_times
+        if travel_times is None:
+            phi = self.graph.nodes[node]["candidate"]
+            return 1.0 / max(phi, 1)
+
+        subtree_nodes = _part_nodes(self.successors, node)
+        candidates_in_subtree = self.candidate_nodes & subtree_nodes
+
+        if not candidates_in_subtree:
+            return float("inf")
+
+        # r(T_u) = min over candidates f of (max over nodes v in T_u of dist(f,v))
+        best_radius = float("inf")
+        for f in candidates_in_subtree:
+            eccentricity = max(
+                travel_times.get((f, v), float("inf"))
+                for v in subtree_nodes
+            )
+            if eccentricity < best_radius:
+                best_radius = eccentricity
+
+        return best_radius
+
 
 def accumulate_tree(tree: SpanningTree, accumulation_columns):
     """
@@ -222,7 +295,7 @@ def random_spanning_tree(graph: nx.Graph) -> nx.Graph:
     :rtype: nx.Graph
     """
     for edge in graph.edges():
-        weight = random.random()
+        weight = rng.random()
         graph.edges[edge]["random_weight"] = weight
 
     spanning_tree = tree.minimum_spanning_tree(
@@ -234,24 +307,24 @@ def random_spanning_tree(graph: nx.Graph) -> nx.Graph:
 def uniform_spanning_tree(graph: nx.Graph) -> nx.Graph:
     """
     Builds a spanning tree chosen uniformly from the space of all
-    spanning trees of the graph. Uses Wilson's algorithm.
+    spanning trees of the graph using Wilson's algorithm (loop-erased
+    random walk).
 
     :param graph: Networkx Graph
     :type graph: nx.Graph
-    :param choice: :func:`random.choice`. Defaults to :func:`random.choice`.
-    :type choice: Callable, optional
 
     :returns: A spanning tree of the graph chosen uniformly at random.
     :rtype: nx.Graph
     """
-    root = random.choice(list(graph.node_indices))
-    tree_nodes = set([root])
+    nodes = list(graph.nodes)
+    root = rng.choice(nodes)
+    tree_nodes = {root}
     next_node = {root: None}
 
-    for node in graph.node_indices:
+    for node in nodes:
         u = node
         while u not in tree_nodes:
-            next_node[u] = random.choice(list(graph.neighbors(u)))
+            next_node[u] = rng.choice(list(graph.neighbors(u)))
             u = next_node[u]
 
         u = node
@@ -318,17 +391,45 @@ def compute_subtree_nodes(tree, succ, root) -> Dict:
 
 
 """  ------------------------------ Main Functions ------------------------------  """
-# Tuple that is used in the find_balanced_edge_cuts function
-Cut = namedtuple("Cut", "node subnodes assigned_teams demand")
-Cut.__doc__ = "Represents a cut in a graph."
-Cut.node.__doc__ = ""
-Cut.subnodes.__doc__ = (
-    "The (frozen) subset of nodes on one side of the cut. Defaults to None."
-)
-Cut.assigned_teams.__doc__ = (
-    "The number of doctor-nurse teams for the subtree beneath the cut edge."
-)
-Cut.demand.__doc__ = "Total demand of nodes in Cut.subset"
+
+Cut = namedtuple("Cut", "node subnodes assigned_teams demand psi")
+"""
+Represents one admissible cut of a spanning tree.
+
+Fields:
+  node          – root node of the cut subtree
+  subnodes      – frozenset of nodes on one side of the cut
+  assigned_teams – number of doctor-nurse teams for this side
+  demand        – total demand of subnodes
+  psi           – candidate-awareness score ψ(e) = φ(u) · exp(-γ · r(T_u))
+"""
+
+
+@dataclass(frozen=True)
+class CutParams:
+    """
+    Cut parameters for a spanning tree bipartition.
+    Separates algorithmic settings from the tree structure itself.
+
+    :ivar ideal_demand: Target demand per team.
+    :ivar epsilon: Allowed relative deviation from ideal_demand.
+    :ivar capacity_level: Maximum teams per district.
+    :ivar n_teams: Total teams to allocate across the graph.
+    :ivar two_sided: If True, both sides of the cut must be balanced.
+    :ivar gamma: Tuning parameter for psi score. 0 -> psi = phi (feasibility count only).
+    :ivar travel_times: Dict (facility, node) -> travel time. None falls back to proxy.
+    :ivar psi_fn: Optional custom psi scoring function(phi, gamma, radius) -> float.
+    """
+
+    ideal_demand: float
+    epsilon: float
+    capacity_level: int
+    n_teams: int
+    two_sided: bool = False
+    gamma: float = 0.0
+    travel_times: Optional[Dict] = None
+    psi_fn: Optional[Any] = None  # Callable[[int, float, float], float]
+    recorder: Optional[Any] = None  # Recorder instance for substep recording
 
 
 @dataclass(frozen=True)
@@ -337,7 +438,7 @@ class Flip:
     team_flips: Dict[Any, Any] = field(default_factory=dict)
     new_ids: frozenset = field(default_factory=frozenset)
     merged_ids: frozenset = field(default_factory=frozenset)
-    super_cut_object: Optional[Cut] = None
+    log_proposal_ratio: float = 0.0
 
     def add_merged_ids(self, new: FrozenSet) -> "Flip":
         return replace(self, merged_ids=new)
@@ -351,21 +452,43 @@ def two_sided_cut(h: SpanningTree, density_check) -> List[Cut]:
         pop = h.graph.nodes[node]["demand"]
         for assign_team in range(1, min(h.capacity_level + 1, h.n_teams + 1)):
 
-            if h.has_ideal_demand(assign_team, pop):  # 3. workload
-                if node == h.root or (
-                    h.complement_has_ideal_demand_too(  # 4. compelement's workload too
-                        assign_team, pop
-                    )
+            if h.has_ideal_demand(assign_team, pop):
+                if node == h.root:
+                    # Root cut: take the entire tree as one district.
+                    # No complement district exists, so psi is just the subtree score.
+                    psi_subtree = h.psi(node)
+                    if psi_subtree > 0:
+                        cuts.append(
+                            Cut(
+                                node=node,
+                                subnodes=frozenset(_part_nodes(h.successors, node)),
+                                assigned_teams=assign_team,
+                                demand=pop,
+                                psi=psi_subtree,
+                            )
+                        )
+                elif (
+                    h.complement_has_ideal_demand_too(assign_team, pop)
                     and h.n_teams - assign_team > 0
                 ):
-                    cuts.append(  # 5. ACCEPTED
-                        Cut(
-                            node=node,
-                            subnodes=frozenset(_part_nodes(h.successors, node)),
-                            assigned_teams=assign_team,
-                            demand=pop,
-                        )
+                    psi_subtree = h.psi(node)
+                    complement_node = h.graph.nodes[node]["candidate"]
+                    complement_phi = h.tot_candidates - complement_node
+                    psi_complement = (
+                        float(complement_phi) if h.params.gamma == 0.0
+                        else complement_phi * math.exp(-h.params.gamma / max(complement_phi, 1))
                     )
+                    psi_score = psi_subtree * psi_complement
+                    if psi_score > 0:
+                        cuts.append(
+                            Cut(
+                                node=node,
+                                subnodes=frozenset(_part_nodes(h.successors, node)),
+                                assigned_teams=assign_team,
+                                demand=pop,
+                                psi=psi_score,
+                            )
+                        )
     return cuts
 
 
@@ -384,11 +507,17 @@ def one_sided_cut(h: SpanningTree, density_check):
                         subnodes=frozenset(_part_nodes(h.successors, node)),
                         assigned_teams=assign_team,
                         demand=pop,
+                        psi=h.psi(node),
                     )
                 )
             elif h.complement_has_the_ideal_demand(
                 assign_team, pop
             ) and h.complement_has_facility(node):
+                complement_phi = h.tot_candidates - h.graph.nodes[node]["candidate"]
+                psi_complement = (
+                    float(complement_phi) if h.params.gamma == 0.0
+                    else complement_phi * math.exp(-h.params.gamma / max(complement_phi, 1))
+                )
                 cuts.append(
                     Cut(
                         node=node,
@@ -397,6 +526,7 @@ def one_sided_cut(h: SpanningTree, density_check):
                         ),
                         assigned_teams=assign_team,
                         demand=(h.total_demand - pop),
+                        psi=psi_complement,
                     )
                 )
     return cuts
@@ -471,12 +601,14 @@ def find_superedge_cuts(
                     or abs((h.total_demand - pop) - (h.n_teams - teams) * h.ideal_demand)
                     <= h.ideal_demand * (h.n_teams - teams) * h.epsilon
                 ):
+                    # Supergraph: ψ = teams × complement_teams (product of team counts)
                     cuts.append(
                         Cut(
                             node=node,
                             subnodes=frozenset(_part_nodes(h.successors, node)),
                             assigned_teams=teams,
                             demand=pop,
+                            psi=float(teams * (h.n_teams - teams)),
                         )
                     )
         else:  # one sided
@@ -489,6 +621,7 @@ def find_superedge_cuts(
                         subnodes=frozenset(_part_nodes(h.successors, node)),
                         assigned_teams=teams,
                         demand=pop,
+                        psi=float(teams),
                     )
                 )
             elif (2 <= h.n_teams - teams <= h.capacity_level) and abs(
@@ -502,6 +635,7 @@ def find_superedge_cuts(
                         ),
                         assigned_teams=teams,
                         demand=(h.total_demand - pop),
+                        psi=float(h.n_teams - teams),
                     )
                 )
     return cuts
@@ -518,44 +652,57 @@ def bipartition_tree(
     iteration: int = 0,
     density: Optional[float] = None,
     max_attempts=5000,
-    allow_pair_reselection: bool = False,  # do we need this?
-    snapshot=False,
+    allow_pair_reselection: bool = False,
     initial=False,
+    tree_sampler=None,
+    gamma: float = 0.0,
+    travel_times=None,
+    psi_fn=None,
+    recorder=None,
 ) -> Cut:
     """
-    This function finds a balanced 2 partition of a graph by drawing a
-    spanning tree and finding an edge to cut that leaves at most an epsilon
-    imbalance between the demands of the parts. If a root fails, a new tree is drawn.
+    Finds a balanced 2-partition of a graph by drawing a spanning tree and
+    finding an edge to cut that leaves at most an epsilon imbalance between
+    the demands of the parts. If no valid cut exists, a new tree is drawn.
 
     :param graph: The graph to partition.
-    :param column_names:
     :param demand_target: The target demand for the returned subset of nodes.
-    :param epsilon: The allowable deviation from ``demand_target`` (as a percentage of
-        ``demand_target``) for the subgraph's demand.
-    :param capacity_level: The maximum number of doctor-nurse teams in a facility,
-        If it is 1, n_teams many districts are created.
-    :param n_teams: Number of doctor-nurse teams for the facilities in the subgraph.
-    :param add_root:
-    :param max_attempts: The maximum number of attempts that should be made to bipartition.
-        Defaults to 10000.
-    :param allow_pair_reselection: Whether we would like to return an error to the calling
-        function to ask it to reselect the pair of nodes to try and recombine. Defaults to False.
+    :param epsilon: The allowable deviation from ``demand_target``.
+    :param capacity_level: Maximum teams per district.
+    :param n_teams: Total teams for the subgraph.
+    :param two_sided: If True, both sides of the cut must be balanced.
+    :param supergraph: If True, use supergraph admissibility conditions.
+    :param tree_sampler: Callable(nx.Graph) -> nx.Graph that produces a spanning tree.
+        Defaults to ``uniform_spanning_tree`` (Wilson's algorithm).
+    :param gamma: Candidate-awareness tuning parameter (>= 0). Default 0 (uniform).
+    :param travel_times: Dict (facility, node) -> travel time for psi computation.
+    :param psi_fn: Optional custom scoring function(phi, gamma, radius) -> float.
+    :param max_attempts: Maximum spanning tree samples before giving up.
+    :param allow_pair_reselection: If True, raise ReselectException instead of RuntimeError.
 
-    :returns: A tuple of set of nodes and number of doctor-nurse teams for the nodes.
-    :raises RuntimeError: If a possible cut cannot be found after the maximum number of attempts
-        given by ``max_attempts``.
+    :returns: A (Cut, log_cut_ratio) tuple.
+    :raises RuntimeError: If no valid cut found after ``max_attempts``.
     """
+    if tree_sampler is None:
+        tree_sampler = uniform_spanning_tree
+
     for _ in range(max_attempts):
 
-        spanning_tree = random_spanning_tree(graph)
+        spanning_tree = tree_sampler(graph)
 
         h = SpanningTree(
             graph=spanning_tree,
-            ideal_demand=demand_target,
-            epsilon=epsilon,
-            n_teams=n_teams,
-            capacity_level=capacity_level,
-            two_sided=two_sided,
+            params=CutParams(
+                ideal_demand=demand_target,
+                epsilon=epsilon,
+                capacity_level=capacity_level,
+                n_teams=n_teams,
+                two_sided=two_sided,
+                gamma=gamma,
+                travel_times=travel_times,
+                psi_fn=psi_fn,
+                recorder=recorder,
+            ),
             supergraph=supergraph,
         )
 
@@ -564,10 +711,28 @@ def bipartition_tree(
         else:
             possible_cuts = find_superedge_cuts(h)
 
+        possible_cuts = [c for c in possible_cuts if c.psi > 0]
         if possible_cuts:
-            if snapshot == True:
-                export_tree(h, iteration, initial=initial)
-            return random.choice(possible_cuts)
+            total_psi = sum(c.psi for c in possible_cuts)
+            weights = [c.psi / total_psi for c in possible_cuts]
+            chosen = rng.choices(possible_cuts, weights=weights, k=1)[0]
+            log_cut_ratio = math.log(chosen.psi) - math.log(total_psi)
+
+            # Record substep for animation
+            rec = h.params.recorder
+            if rec is not None:
+                rec.record_tree_cut(
+                    tree_edges=list(spanning_tree.edges()),
+                    root=h.root,
+                    cut_node=chosen.node,
+                    psi_chosen=chosen.psi,
+                    psi_total=total_psi,
+                    n_cuts=len(possible_cuts),
+                    spanning_tree_obj=h,
+                    extracted_nodes=chosen.subnodes,
+                )
+
+            return chosen, log_cut_ratio
 
     if allow_pair_reselection:
         raise ReselectException(
@@ -605,7 +770,7 @@ def determine_district_id(ids, max_id, assignments, district_nodes):
             district = max(assignment_counts, key=assignment_counts.get)
             ids.remove(district)
         else:
-            district = random.choice(list(ids))
+            district = rng.choice(list(ids))
             ids.remove(district)
     else:
         district = max_id + 1
@@ -617,17 +782,17 @@ def determine_district_id(ids, max_id, assignments, district_nodes):
 def capacitated_recursive_tree(
     graph: nx.Graph,
     n_teams: int,
-    demand_target: int,  # think about this. union of two districts may get far from average in demand
+    demand_target: int,
     epsilon: float,
     capacity_level: int,
     density=None,
-    snapshot=False,
     supergraph=False,
     assignments=None,
     merged_ids=None,
     max_id=0,
     debt=None,
-    iteration=0
+    iteration=0,
+    recorder=None,
 ) -> Flip:
     """
      Recursively partitions a graph into balanced districts using bipartition_tree.
@@ -651,6 +816,7 @@ def capacitated_recursive_tree(
     current_flips = {}  # maps nodes to their districts
     current_team_flips = {}  # maps districts to their number of teams
     current_new_ids = set()
+    log_proposal_ratio = 0.0  # accumulated log(ψ_chosen / Σψ) over all cuts
     ids = merged_ids
     remaining_nodes = set(graph.nodes())
     remaining_teams = n_teams
@@ -680,7 +846,7 @@ def capacitated_recursive_tree(
     # new_demand_target = demand_target
     while remaining_teams > 0:  # better to take len(remaining_nodes) > 0
 
-        two_sided = remaining_teams <= capacity_level  # If True ...
+        two_sided = remaining_teams <= capacity_level
 
         # if two_sided==False:
         min_demand = max(demand_target * (1 - epsilon), demand_target * (1 - epsilon) - debt)
@@ -697,7 +863,7 @@ def capacitated_recursive_tree(
         # print("new epsilon:", new_epsilon)
 
         try:
-            cut_object = bipartition_tree(
+            cut_object, log_cut_ratio = bipartition_tree(
                 graph.subgraph(remaining_nodes),
                 demand_target=new_demand_target,
                 capacity_level=capacity_level,
@@ -706,14 +872,15 @@ def capacitated_recursive_tree(
                 two_sided=two_sided,
                 supergraph=supergraph,
                 density=density,
-                snapshot=snapshot,
                 iteration=iteration,
+                recorder=recorder,
             )
 
         except Exception:
             raise
 
-        hired_teams = cut_object.assigned_teams  # number of r\
+        log_proposal_ratio += log_cut_ratio
+        hired_teams = cut_object.assigned_teams
         # print("hired teams", hired_teams)
         # print("district demand:", cut_object.demand)
         district_nodes = cut_object.subnodes
@@ -751,20 +918,6 @@ def capacitated_recursive_tree(
 
         current_new_ids.add(district_id)
 
-        if snapshot == True:
-            export_district_frame(
-                cut_object.node,
-                iteration,
-                district_nodes,
-                hired_teams,
-                cut_object.demand,
-                district_id,
-                debt,
-                merged_ids,
-                initial=(assignments == None),
-                superdistrict=False
-            )
-
         iteration += 1
 
     # print("------ recursive function ends sucessfully.")
@@ -773,4 +926,5 @@ def capacitated_recursive_tree(
         flips=current_flips,
         team_flips=current_team_flips,
         new_ids=frozenset(current_new_ids),
+        log_proposal_ratio=log_proposal_ratio,
     )

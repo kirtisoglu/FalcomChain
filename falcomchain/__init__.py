@@ -1,5 +1,6 @@
 from .constraints import *
 from .graph import Graph, Grid
+from .random import rng, set_seed
 from .helper import *
 from .markovchain import (
     MarkovChain,
