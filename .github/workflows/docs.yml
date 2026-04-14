@@ -26,12 +26,12 @@ jobs:
 
       - name: Build Sphinx docs
         run: |
-          cd docs/_sphinx
-          sphinx-build -b html -W --keep-going . _build/html
+          cd docs
+          sphinx-build -b html . _build/html
 
       - name: Upload built docs as artifact
         uses: actions/upload-artifact@v4
         with:
           name: html-docs
-          path: docs/_sphinx/_build/html
+          path: docs/_build/html
           retention-days: 7

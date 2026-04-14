@@ -25,8 +25,8 @@ htmlcov/
 .ipynb_checkpoints/
 
 # ---- Sphinx ----
-docs/_sphinx/_build/
-docs/_sphinx/jupyter_execute/
+docs/_build/
+docs/jupyter_execute/
 
 # ---- Tutorial run output (created by examples/notebooks) ----
 output/

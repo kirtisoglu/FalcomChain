@@ -8,12 +8,10 @@ A Python library for hierarchical capacitated facility location and districting 
 :maxdepth: 2
 :caption: Guides
 
-../getting_started.md
-../algorithm.md
-../schema.md
-../geodataframe.md
-../structure.md
-../roadmap.md
+getting_started
+algorithm
+schema
+geodataframe
 ```
 
 ## Tutorials
@@ -23,7 +21,7 @@ A Python library for hierarchical capacitated facility location and districting 
 :caption: Tutorials
 :glob:
 
-../tutorials/*
+tutorials/*
 ```
 
 ## API reference

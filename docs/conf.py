@@ -12,7 +12,7 @@ import os
 import sys
 
 # Add the project root to sys.path so autodoc can import falcomchain
-sys.path.insert(0, os.path.abspath("../.."))
+sys.path.insert(0, os.path.abspath(".."))
 
 # -- Project information ---------------------------------------------------
 project = "FalcomChain"
@@ -29,11 +29,7 @@ extensions = [
     "myst_nb",                     # render .md and .ipynb (supersedes myst-parser)
 ]
 
-source_suffix = {
-    ".rst": "restructuredtext",
-    ".md": "markdown",
-    ".ipynb": "myst-nb",
-}
+source_suffix = [".rst", ".md", ".ipynb"]
 master_doc = "index"
 
 # myst-nb settings
