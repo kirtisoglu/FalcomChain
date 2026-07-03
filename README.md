@@ -13,7 +13,8 @@ planning, healthcare network design, and stability analysis.
 
 The library implements **FalCom** (Kırtışoğlu & Kaul), the first MCMC framework
 that simultaneously partitions a region into capacity-respecting districts at
-multiple hierarchy levels and assigns facilities, with convergence guarantees.
+multiple hierarchy levels and assigns facilities, with per-step feasibility
+guarantees on the recursive construction.
 
 > **Status:** Pre-publication, under active development. The 0.1.0 API is
 > stable but may evolve as the paper experiments solidify.
@@ -36,8 +37,10 @@ candidates, FalcomChain:
 
 ## Installation
 
+FalcomChain is not yet on PyPI. Install the latest version from GitHub:
+
 ```bash
-pip install falcomchain
+pip install "git+https://github.com/kirtisoglu/FalcomChain.git"
 ```
 
 For development:
@@ -54,9 +57,9 @@ Requires **Python 3.12+**.
 
 ## Documentation
 
-Full documentation, tutorials, and API reference: **[falcomchain.readthedocs.io](https://falcomchain.readthedocs.io)** (coming soon).
+Full documentation, tutorials, and API reference: **[falcomchain.readthedocs.io](https://falcomchain.readthedocs.io)**.
 
-In the meantime, browse the local docs:
+You can also browse the documentation sources:
 
 |                                                       |                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------- |
@@ -82,7 +85,7 @@ with the others as your workflow needs them.
 | Library                                                            | Purpose                                                                                                                    | Status              |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------------------- |
 | **FalcomChain** *(this library)*                                   | MCMC sampler for hierarchical capacitated facility location and districting.                                               | Active              |
-| **[FalcomTravel](https://github.com/kirtisoglu/FalcomTravel)**     | Travel-time matrix computation (real travel times, graph distance, Euclidean) — feeds `Assignment.travel_times`.           | Planned             |
+| **[FalcomTravel](https://github.com/kirtisoglu/FalcomTravel)**     | Travel-time matrix computation (multi-backend: r5r, OSRM, OSMnx, graph distance, Euclidean) — feeds `Assignment.travel_times`. | Active (pre-PyPI)   |
 | **[FalcomPlot](https://github.com/kirtisoglu/FalcomPlot)**         | Static plotting for synthetic grids and interactive Leaflet maps for real geographies. Used by the FalcomChain doc pages.  | Active (pre-PyPI)   |
 
 Typical end-to-end flow: build a `Graph` from your geodata, compute a
