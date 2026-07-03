@@ -11,7 +11,7 @@ from the space of feasible plans, producing ensembles of contiguous districts
 with facility assignments — useful for service zone design, sales territory
 planning, healthcare network design, and stability analysis.
 
-The library implements **FalCom** (Kaul & Kırtışoğlu), the first MCMC framework
+The library implements **FalCom** (Kırtışoğlu & Kaul), the first MCMC framework
 that simultaneously partitions a region into capacity-respecting districts at
 multiple hierarchy levels and assigns facilities, with convergence guarantees.
 
@@ -102,9 +102,9 @@ visualize results with FalcomPlot.
 If you use FalcomChain in your research, please cite the paper:
 
 ```bibtex
-@article{kaul2026falcom,
+@article{kirtisoglu2026falcom,
   title={FalCom: An MCMC Sampling Framework for Facility Location and Districting Problems},
-  author={Kaul, Hemanshu and K{\i}rt{\i}{\c{s}}o{\u{g}}lu, Alaittin},
+  author={K{\i}rt{\i}{\c{s}}o{\u{g}}lu, Alaittin and Kaul, Hemanshu},
   year={2026},
 }
 ```
