@@ -160,11 +160,14 @@ if not report.passes:
     # candidates from real ones.
 ```
 
-**LAS reality check.** On the London graph, the 63 real stations do
-*not* fragment the LSOA graph — removing them leaves one connected
-component of 4,979 nodes carrying 9.05 M demand. Assumption 6.1 fails
-at every operational `(demand_target, c_min)` combination, so the
-repair step is mandatory. See
+**LAS reality check.** On the London graph, the 66 real stations do
+*not* fragment the LSOA graph — the candidate-free subgraph remains
+one huge connected component, so Assumption 6.1 fails at every
+operational `(demand_target, c_min)` combination and the repair step
+is mandatory. At the paper's calibration the per-component demand cap
+is `Vol_max = c_min · (1 − ε) · w_unit = 9,254` calls per year, and
+repair grows the candidate set to 1,831 sites (66 real stations plus
+1,765 artificial — 36.7% of LSOAs). See
 [`analysis/01_feasibility.md`](https://github.com/kirtisoglu/London-Ambulance-Service-System/blob/main/analysis/01_feasibility.md)
 for the full report.
 
