@@ -1,6 +1,7 @@
 from collections import namedtuple
+from dataclasses import replace
 from functools import partial
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from falcomchain.random import rng
 
@@ -13,12 +14,7 @@ from falcomchain.tree.tree import (
     capacitated_recursive_tree,
 )
 
-# imported lazily to avoid circular imports at module load time
-def _get_chain_state_cls():
-    from falcomchain.markovchain.state import ChainState
-    from falcomchain.markovchain.energy import compute_energy
-    return ChainState, compute_energy
-
+from .super_partitioners import resample_super_partition
 
 class MetagraphError(Exception):
     """
@@ -40,25 +36,80 @@ class ValueWarning(UserWarning):
 
 def hierarchical_recom(
     state,
-    epsilon: float,
+    epsilon_base: float,
+    epsilon_super: float,
     demand_target: float,
     density: Optional[float] = None,
+    super_partitioner: Callable = resample_super_partition,
+    gamma_base: float = 0.0,
+    gamma_super: float = 0.0,
+    psi_fn: Optional[Callable] = None,
+    super_psi_fn: Optional[Callable] = None,
+    travel_times: Optional[dict] = None,
+    c_min_base: int = 1,
+    c_min_super: Optional[int] = None,
+    c_max_super: Optional[int] = None,
+    min_districts_super: int = 1,
+    max_attempts_super: int = 1000,
+    rule: str = "per_team",
+    enforce_global_balance: bool = False,
 ):
     """
     Proposes a new ChainState via two-level hierarchical ReCom.
 
-    At the upper level, the supergraph is recursively partitioned into superdistricts.
-    One superdistrict is chosen uniformly at random and its merged region is re-split
-    by recursive partitioning at the base level. Recording (if enabled) is driven by
+    The upper-level (supergraph) partitioning is delegated to
+    ``super_partitioner``. The default :func:`resample_super_partition` samples
+    a fresh level-2 partition each step. Pass :func:`fixed_super_partition`
+    (or any custom callable with the same signature) for alternative behavior
+    such as fixed superdistricts.
+
+    Once the upper level returns the chosen superdistrict's level-1 IDs,
+    those base nodes are re-partitioned via recursive partitioning to
+    produce the new level-1 districts. Recording (if enabled) is driven by
     the ``Recorder`` attached to the chain via ``state._recorder``.
 
     :param state: The current ChainState.
-    :param epsilon: Maximum relative demand deviation allowed.
-    :param demand_target: Target demand per team (d_bar).
+    :param epsilon_base: Level-1 demand-balance tolerance ε¹ (paper). Used
+        for the lower-level recursive partitioning of the chosen superdistrict.
+    :param epsilon_super: Level-2 demand-balance tolerance ε² (paper). Used
+        by the upper-level ``super_partitioner``.
+    :param demand_target: Per-team workload d̄ (paper).
     :param density: Optional density parameter.
+    :param super_partitioner: Callable with signature
+        ``(state, epsilon_super, demand_target, density, recorder,
+        super_psi_fn, gamma_super) ->
+        (super_flip, merge, super_teams, super_demand, log_super_ratio)``.
+        Defaults to :func:`resample_super_partition`.
+    :param gamma_super: Inverse temperature γ² for the level-2 hub-coherence
+        score (paper Eq. 22, 27). When ``> 0`` and ``super_psi_fn`` is
+        ``None``, a hub-coherence scorer is built from ``state``. Default 0.
+    :param super_psi_fn: Optional precomputed level-2 scorer
+        ``(subnodes, teams) -> float``. Overrides the default factory built
+        from ``gamma_super``.
+    :param c_min_base: Minimum level-1 capacity per district (default 1).
+    :param c_min_super: Minimum level-2 capacity (number of level-1
+        districts per super-district). Defaults to ``2 · c_min_base`` —
+        the standard choice that keeps super-districts non-trivial and
+        aligns the supergraph's leaf demand range with the actual
+        super-node weights (≈ ``c¹·w``).
+    :param c_max_super: Maximum level-2 capacity (paper §6.4 default: 3).
+        Required.
     :returns: The proposed ChainState.
     """
-    ChainState, compute_energy = _get_chain_state_cls()
+    if c_min_super is None:
+        c_min_super = 2 * c_min_base
+    if c_min_super < 2 * c_min_base:
+        raise ValueError(
+            f"c_min_super (={c_min_super}) must be ≥ 2·c_min_base "
+            f"(={2 * c_min_base}). Tighter values produce trivial "
+            f"identity-grouping super-partitions where no merge is admissible."
+        )
+    # Default c_max_super to 2·c¹_max so super-leaves can fit two
+    # max-capacity L1 districts. Setting it equal to c¹_max (paper's
+    # narrow choice of 3) leaves room only for single-super-node leaves
+    # and the recursion typically can't find admissible cuts.
+    if c_max_super is None:
+        c_max_super = max(3, 2 * state.partition.capacity_level)
     partition = state.partition
     rec = getattr(state, "_recorder", None)
 
@@ -71,61 +122,33 @@ def hierarchical_recom(
         capacity_level=partition.capacity_level,
         density=density,
         recorder=rec,
+        c_min=c_min_base,
+        gamma=gamma_base,
+        travel_times=travel_times,
+        psi_fn=psi_fn,
+        rule=rule,
+        enforce_global_balance=enforce_global_balance,
     )
 
-    # ---- UPPER LEVEL: Recursive partitioning of supergraph G² ----
-    # Paper Algorithm 2, line 2: partition G^2 into superdistricts via
-    # RecursivePartitioning. Falls back to single bipartition on small supergraphs
-    # where the recursive approach can fail (e.g., teams don't split cleanly).
-    total_teams = sum(partition.teams.values())
-
+    # ---- UPPER LEVEL: delegated to the super_partitioner callable ----
     if rec is not None:
         rec.begin_level("supergraph", partition=partition)
 
-    try:
-        super_flip = capacitated_recursive_tree(
-            graph=partition.supergraph.copy(),
-            n_teams=total_teams,
+    super_flip, merge, super_teams, super_demand, log_super_ratio = (
+        super_partitioner(
+            state,
+            epsilon_super=epsilon_super,
             demand_target=demand_target,
-            epsilon=epsilon,
-            capacity_level=partition.capacity_level,
+            c_min_super=c_min_super,
+            c_max_super=c_max_super,
             density=density,
-            supergraph=True,
-            iteration=partition.step,
             recorder=rec,
+            super_psi_fn=super_psi_fn,
+            gamma_super=gamma_super,
+            max_attempts=max_attempts_super,
+            min_districts_super=min_districts_super,
         )
-        log_super_ratio = super_flip.log_proposal_ratio
-
-        # Invert super_flip: superdistrict_id -> set of supergraph nodes
-        super_parts = {}
-        for sg_node, super_id in super_flip.flips.items():
-            super_parts.setdefault(super_id, set()).add(sg_node)
-
-        # Pick one superdistrict uniformly at random (Algorithm 1 line 3)
-        chosen_super_id = rng.choice(list(super_parts.keys()))
-        merge = frozenset(super_parts[chosen_super_id])
-        super_teams = super_flip.team_flips[chosen_super_id]
-        super_demand = sum(
-            partition.supergraph.nodes[n].get("demand", 0) for n in merge
-        )
-    except RuntimeError:
-        # Fallback for small supergraphs: single bipartition extraction
-        acut_object, log_super_ratio = bipartition_tree(
-            graph=partition.supergraph.copy(),
-            demand_target=demand_target,
-            capacity_level=partition.capacity_level,
-            n_teams=total_teams,
-            epsilon=epsilon,
-            two_sided=False,
-            supergraph=True,
-            density=False,
-            max_attempts=100,
-            iteration=partition.step,
-            recorder=rec,
-        )
-        merge = frozenset(acut_object.subnodes)
-        super_teams = acut_object.assigned_teams
-        super_demand = acut_object.demand
+    )
 
     if rec is not None:
         super_centers = {}
@@ -133,7 +156,10 @@ def hierarchical_recom(
             super_centers = dict(state.super_facility.centers)
         rec.end_level(centers=super_centers)
 
-    superflip = Flip(merged_ids=merge)
+    # Carry the full level-2 assignment forward so the new partition
+    # can persist it (used by SuperFacilityAssignment, ensemble analysis,
+    # and any future level-2 consumer).
+    superflip = replace(super_flip, merged_ids=frozenset(merge))
 
     merged_base_nodes = set.union(*(set(partition.parts[part]) for part in merge))
     subgraph = partition.graph.graph.subgraph(merged_base_nodes)
@@ -157,6 +183,9 @@ def hierarchical_recom(
     if rec is not None:
         rec.begin_level("base")
 
+    # Initial debt is 0 by construction at the lower level: new_demand_target
+    # is recomputed locally as super_demand / super_teams (Remark A.5 in the
+    # paper). No initial-debt argument is passed.
     flip = method(
         graph=subgraph,
         n_teams=int(super_teams),
@@ -164,8 +193,7 @@ def hierarchical_recom(
         assignments=sub_assignments,
         max_id=max_id,
         demand_target=new_demand_target,
-        epsilon=epsilon,
-        debt=(super_demand - super_teams * demand_target),
+        epsilon=epsilon_base,
         iteration=partition.step,
     )
     flip = flip.add_merged_ids(merge)
@@ -178,24 +206,18 @@ def hierarchical_recom(
 
     proposed_partition = partition.perform_flip(flipp=flip, superflipp=superflip)
 
-    # state.next() will use state.energy_fn if set, otherwise the energy arg below.
-    # We default to compute_energy when no custom energy_fn is configured.
-    if state.energy_fn is None:
-        # Need to first build the state to compute default energy via FacilityAssignment
-        proposed_state = state.next(
-            partition=proposed_partition,
-            energy=0.0,
-            log_proposal_ratio=0.0,
-            feasible=True,
-        )
-        proposed_state.energy = compute_energy(proposed_state)
-    else:
-        proposed_state = state.next(
-            partition=proposed_partition,
-            energy=0.0,
-            log_proposal_ratio=0.0,
-            feasible=True,
-        )
+    # FalCom is a sampler by default. Energy is an objective function used
+    # only by the optimizer (boltzmann acceptance) and is therefore opt-in:
+    # when state.energy_fn is None we leave proposed_state.energy at the
+    # placeholder, never invoking compute_energy. Users who want Boltzmann
+    # optimization pass energy_fn=compute_energy (or a custom callable) to
+    # ChainState.initial.
+    proposed_state = state.next(
+        partition=proposed_partition,
+        energy=0.0,
+        log_proposal_ratio=0.0,
+        feasible=True,
+    )
 
     if rec is not None:
         # Level-1 facility centers

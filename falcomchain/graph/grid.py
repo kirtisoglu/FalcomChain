@@ -1,15 +1,14 @@
 """
-This module provides a Grid class used for creating and manipulating grid partitions.
-It's part of the GerryChain suite, designed to facilitate experiments with redistricting
-plans without the need for extensive data processing. This module relies on NetworkX for
-graph operations and integrates with GerryChain's Partition class.
+Synthetic Grid graphs for FalcomChain tutorials, tests, and quick experiments.
 
-Dependencies:
+The :class:`Grid` builder produces a small graph with the FalcomChain node
+schema (``demand``, ``candidate``, ``super_candidate``, ``C_X``, ``C_Y``,
+``area``) populated, so downstream code (Partition, MarkovChain, ensemble
+analysis) can run end-to-end without external data.
 
-- math: For math.floor() function.
-- networkx: For graph operations with using the graph structure in
-    :class:`~falcomchain.graph.Graph`.
-- typing: Used for type hints.
+Adapted from the equivalent ``Grid`` utility in
+`GerryChain <https://github.com/mggg/GerryChain>`_; simplified for the
+FalcomChain schema and extended with ``super_candidate`` defaults.
 """
 
 import math
@@ -118,6 +117,10 @@ class Grid:
 
         values = {node: False for node in graph.nodes}
         networkx.set_node_attributes(graph, values, name="candidate")
+        # super_candidate (level-2 facility eligibility) defaults to 0;
+        # callers can set it later. Keeping it on every node lets schema
+        # validation pass without special-casing the synthetic Grid.
+        networkx.set_node_attributes(graph, 0, "super_candidate")
 
         return graph
 

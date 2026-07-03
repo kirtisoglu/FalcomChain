@@ -21,12 +21,13 @@ These live on each node: `graph.nodes[node][attr]`.
 | Name | Type | Default | Purpose |
 |---|---|---|---|
 | `demand` | float | — | Demand of the unit (population, workload, requests/day). Used for demand-balance constraints. Must be `>= 0`. |
-| `candidate` | int (0 or 1) | 0 | Whether this node is a facility candidate. Each district must contain at least one candidate. |
+| `candidate` | int (0 or 1) | 0 | Whether this node is a **level-1** facility candidate (F¹). Each district must contain at least one candidate. |
 
 ### Optional
 
 | Name | Type | Default | Purpose |
 |---|---|---|---|
+| `super_candidate` | int (0 or 1) | 0 | Whether this node is a **level-2** (super-) facility candidate (F² ⊂ V¹). Independent of `candidate` — a node can be in either, both, or neither. Soft constraint: a superdistrict with no super-candidate gets no level-2 facility. See [Level-2 facilities](super_facility.md). |
 | `C_X` | float | 0.0 | X coordinate of the centroid (for visualization). |
 | `C_Y` | float | 0.0 | Y coordinate of the centroid (for visualization). |
 | `area` | float | 1.0 | Geographic area (used for compactness metrics). |
@@ -86,7 +87,8 @@ unless you opt into using them (e.g., via a custom `energy_fn`).
 graph = Graph.from_data(
     edges=...,
     demand=...,
-    candidates=...,
+    candidates=[1, 3, 5],            # F¹: level-1 candidates
+    super_candidates=[3, 7],          # F² ⊂ V¹: level-2 candidates (independent)
     extra_attributes={
         "vulnerability_index": {1: 0.8, 2: 0.3, ...},
         "service_type": {1: "clinic", 2: "hospital", ...},

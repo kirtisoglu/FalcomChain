@@ -36,11 +36,16 @@ partition = Partition.from_random_assignment(
     epsilon=0.1,
     demand_target=1500,
     assignment_class=None,
-    capacity_level=3,
+    capacity_level=2,
 )
 
 # 3. Run the chain
-proposal = partial(hierarchical_recom, epsilon=0.1, demand_target=1500)
+proposal = partial(
+    hierarchical_recom,
+    epsilon_base=0.1,
+    epsilon_super=0.15,   # paper uses ε² > ε¹ typically
+    demand_target=1500,
+)
 chain = MarkovChain(
     proposal=proposal,
     constraints=lambda p: True,
@@ -73,7 +78,7 @@ See [schema reference](schema.md) for the full schema.
 
 ## Travel times
 
-The energy function and facility assignment use a travel-time matrix. Set it
+Facility assignment (and the optional energy objective) uses a travel-time matrix. Set it
 once before running the chain:
 
 ```python

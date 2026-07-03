@@ -58,23 +58,36 @@ Full documentation, tutorials, and API reference: **[falcomchain.readthedocs.io]
 
 In the meantime, browse the local docs:
 
-|                                            |                                          |
-| ------------------------------------------ | ---------------------------------------- |
-| [Getting started](docs/getting_started.md) | 5-minute tutorial                        |
-| [Algorithm overview](docs/algorithm.md)    | What FalCom does, conceptually           |
-| [Graph schema](docs/schema.md)             | Required and optional graph attributes   |
-| [GeoDataFrame guide](docs/geodataframe.md) | Building graphs from shapefiles/GeoJSON  |
-| [Code structure](docs/structure.md)        | Module-by-module breakdown               |
-| [Tutorials](docs/tutorials/)               | Jupyter notebook walkthroughs            |
+|                                                       |                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------- |
+| [Getting started](docs/getting_started.md)            | 5-minute tutorial                                                |
+| [Algorithm overview](docs/algorithm.md)               | What FalCom does, conceptually                                   |
+| [Graph schema](docs/schema.md)                        | Required and optional graph attributes                           |
+| [GeoDataFrame guide](docs/geodataframe.md)            | Building graphs from shapefiles/GeoJSON                          |
+| [Candidate feasibility](docs/feasibility.md)          | Verify Assumption 6.1 and add artificial candidates              |
+| [Ensemble analysis](docs/ensemble.md)                 | Boundary, facility, and capacity statistics across MCMC samples  |
+| [Level-2 facilities](docs/super_facility.md)          | Opt-in super-facility assignment (Eq. 18) with pluggable selector |
+| [Fixed superdistricts](docs/fixed_superdistricts.md)  | Hold the level-2 partition fixed (e.g. health zones)             |
+| [Code structure](docs/structure.md)                   | Module-by-module breakdown                                       |
+| [Tutorials](docs/tutorials/)                          | Jupyter notebook walkthroughs                                    |
 
 ---
 
-## Visualization
+## Companion libraries
 
-For interactive animation of FalCom chains (district boundaries shifting,
-spanning trees, facility selection), use the companion library
-**[FalcomPlot](https://github.com/kirtisoglu/FalcomPlot)** (PyPI release
-coming soon).
+FalcomChain is one of three small, decoupled libraries that together
+cover the FalCom workflow. You can use FalcomChain alone, or compose
+with the others as your workflow needs them.
+
+| Library                                                            | Purpose                                                                                                                    | Status              |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| **FalcomChain** *(this library)*                                   | MCMC sampler for hierarchical capacitated facility location and districting.                                               | Active              |
+| **[FalcomTravel](https://github.com/kirtisoglu/FalcomTravel)**     | Travel-time matrix computation (real travel times, graph distance, Euclidean) — feeds `Assignment.travel_times`.           | Planned             |
+| **[FalcomPlot](https://github.com/kirtisoglu/FalcomPlot)**         | Static plotting for synthetic grids and interactive Leaflet maps for real geographies. Used by the FalcomChain doc pages.  | Active (pre-PyPI)   |
+
+Typical end-to-end flow: build a `Graph` from your geodata, compute a
+travel-time matrix with FalcomTravel, run a chain with FalcomChain,
+visualize results with FalcomPlot.
 
 ---
 
@@ -84,7 +97,7 @@ coming soon).
 
 ---
 
-## Citation
+## Citation and acknowledgment
 
 If you use FalcomChain in your research, please cite the paper:
 
@@ -95,6 +108,14 @@ If you use FalcomChain in your research, please cite the paper:
   year={2026},
 }
 ```
+
+FalcomChain's spanning-tree partition machinery and ReCom-style
+proposal architecture are built on the foundation laid by
+**[GerryChain](https://github.com/mggg/GerryChain)** (MGGG Redistricting Lab).
+We extend GerryChain's redistricting framework to hierarchical,
+capacitated problems with two-level facility assignment, and reuse the
+log-proposal-ratio insight from
+[Cannon, Duchin, Randall, Rule (2022)](https://arxiv.org/abs/2008.08054).
 
 ---
 

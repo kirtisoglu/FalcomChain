@@ -57,8 +57,8 @@
         </mxCell>
 
         <!-- ========== FIND FEASIBLE SUPER CUTS ========== -->
-        <mxCell id="105" value="FindFeasibleSuperCuts&#xa;─────────────&#xa;for u in T \ {r}:&#xa;  check n_teams ≥ 2&#xa;  check demand balance&#xa;  one/two-sided&#xa;  add to E" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="280" y="770" width="220" height="120" as="geometry" />
+        <mxCell id="105" value="FindFeasibleSuperCuts&#xa;─────────────&#xa;for u in T \ {r}:&#xa;  c²_min ≤ teams ≤ c²_max&#xa;  (or same on complement)&#xa;  |pop − teams·d̄| ≤ ε²·teams·d̄&#xa;  one/two-sided&#xa;  add to E" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="770" width="240" height="135" as="geometry" />
         </mxCell>
 
         <!-- ========== SPANNING TREE ========== -->
@@ -72,8 +72,8 @@
         </mxCell>
 
         <!-- ========== ENERGY ========== -->
-        <mxCell id="130" value="Energy Function&#xa;─────────────&#xa;E(s) = ΣΣΣ dᵥ · dist(v, f(D))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="480" y="340" width="220" height="70" as="geometry" />
+        <mxCell id="130" value="Energy Function (opt-in)&#xa;─────────────&#xa;compute_energy(s) = ΣΣΣ dᵥ · dist(v, f(D))&#xa;+ compute_artificial_facility_penalty&#xa;  (λ · #{D : f(D) artificial})" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="340" width="220" height="90" as="geometry" />
         </mxCell>
 
         <!-- ========== FACILITY ASSIGNMENT ========== -->
@@ -82,8 +82,8 @@
         </mxCell>
 
         <!-- ========== ACCEPT ========== -->
-        <mxCell id="150" value="Accept / Reject&#xa;─────────────&#xa;always_accept (default, paper)&#xa;metropolis_hastings (optimizer)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
-          <mxGeometry x="480" y="570" width="220" height="70" as="geometry" />
+        <mxCell id="150" value="Accept / Reject&#xa;─────────────&#xa;always_accept (default, paper)&#xa;boltzmann (heuristic optimizer)&#xa;soft_constraint_accept (per-state)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="480" y="570" width="220" height="80" as="geometry" />
         </mxCell>
 
         <!-- ========== EDGES ========== -->
@@ -185,6 +185,36 @@
 
         <!-- MarkovChain -> Recorder -->
         <mxCell id="220" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="10" target="160" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ENSEMBLE CALLBACKS ========== -->
+        <mxCell id="170" value="EnsembleStats (callback)&#xa;─────────────&#xa;BoundaryCounter&#xa;FacilityCounter (real / artificial)&#xa;CapacityStats (Welford CV, radii)&#xa;burn_in / thin" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="640" width="220" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- MarkovChain -> EnsembleStats -->
+        <mxCell id="221" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="10" target="170" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== FEASIBILITY (PRE-CHAIN) ========== -->
+        <mxCell id="180" value="Feasibility (pre-chain)&#xa;─────────────&#xa;check_facility_density&#xa;repair_facility_density&#xa;  strategies: highest_demand,&#xa;  center, weighted_center,&#xa;  fast_center, balanced_separator,&#xa;  metis_separator (pymetis)&#xa;feasibility_violation()&#xa;c_min relaxation: τ = (1−ε)·c_min·w" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="680" y="120" width="220" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- Feasibility -> ChainState (pre-chain init) -->
+        <mxCell id="222" style="edgeStyle=orthogonalEdgeStyle;dashed=1;startArrow=block;endArrow=none;" edge="1" source="180" target="20" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ========== SUPER-PARTITIONER ========== -->
+        <mxCell id="190" value="Super-partitioner&#xa;─────────────&#xa;resample_super_partition (default)&#xa;  capacitated_recursive_tree on G²&#xa;  c²_min, c²_max, max_attempts caps&#xa;  debt-skip when supergraph=True&#xa;fixed_super_partition (zones held)&#xa;hub_coherence_psi_factory (Eq. 27)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="280" y="430" width="240" height="130" as="geometry" />
+        </mxCell>
+
+        <!-- HierarchicalProposal -> SuperPartitioner -->
+        <mxCell id="223" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="70" target="190" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 

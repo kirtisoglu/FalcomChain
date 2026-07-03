@@ -3,27 +3,39 @@ from typing import Dict, Optional, Tuple
 
 class FacilityAssignment:
     """
-    Computes and caches the best facility center and service radius
-    for each district, given a ChainState.
+    Computes and caches the best facility center and access cost for each
+    district, given a ChainState.
 
-    The optimal center minimises the maximum travel time from the
-    facility to any node in the district (minimax / covering radius).
+    The optimal center is the **demand-weighted 1-median**: the candidate
+    that minimises the total demand-weighted travel time
 
-    Centers and radii are computed lazily on first access and cached.
-    Only districts that changed (via ``flow.node_flows`` and
-    ``flow.part_flows``) are recomputed when ``update()`` is called.
+        cost(D, f) = sum_{v in D} d_v * dist(f, v)
 
-    :ivar centers: Maps district ID → best facility node (or None if not yet computed).
-    :ivar radii:   Maps district ID → covering radius (or None if not yet computed).
+    from the facility to every node in the district. This matches the
+    base-level term of the disaggregated hierarchical median objective
+    (paper Eq. for the MILP benchmark) and is the optimization analogue
+    that the chain's facility-assignment rule (paper Section 5.4) targets.
+
+    Centers and costs are computed eagerly and cached. Only districts that
+    changed (via ``flow.node_flows`` and ``flow.part_flows``) are recomputed
+    in :meth:`updated`.
+
+    :ivar centers: Maps district ID → demand-weighted 1-median node.
+    :ivar radii:   Maps district ID → 1-median access cost
+        ``sum_v d_v * dist(center, v)`` (NOT a covering radius). The name
+        is retained for backward compatibility of accessors.
     """
 
-    __slots__ = ("_centers", "_radii", "_travel_times")
+    __slots__ = ("_centers", "_radii", "_travel_times", "_demands")
 
-    def __init__(self, travel_times: Dict) -> None:
+    def __init__(self, travel_times: Dict, demands: Optional[Dict] = None) -> None:
         """
         :param travel_times: Dict keyed by ``(facility_node, node)`` → travel time.
+        :param demands: Dict keyed by node → demand. Required for the
+            demand-weighted 1-median; if ``None``, unit demands are assumed.
         """
         self._travel_times = travel_times
+        self._demands = demands if demands is not None else {}
         self._centers: Dict = {}
         self._radii: Dict = {}
 
@@ -40,7 +52,9 @@ class FacilityAssignment:
         :param state: A ChainState whose assignment has ``travel_times`` set.
         """
         travel_times = state.assignment.travel_times
-        fa = cls(travel_times)
+        graph = state.graph
+        demands = {v: graph.nodes[v]["demand"] for v in graph.nodes}
+        fa = cls(travel_times, demands)
         assignment = state.assignment
         for part in assignment.parts:
             fa._centers[part], fa._radii[part] = fa._compute(
@@ -57,7 +71,7 @@ class FacilityAssignment:
         :param previous: FacilityAssignment from the parent ChainState.
         :param state:    The proposed ChainState.
         """
-        fa = cls(previous._travel_times)
+        fa = cls(previous._travel_times, previous._demands)
         fa._centers = previous._centers.copy()
         fa._radii = previous._radii.copy()
 
@@ -80,26 +94,29 @@ class FacilityAssignment:
         return fa
 
     # ------------------------------------------------------------------
-    # Core minimax computation
+    # Core demand-weighted 1-median computation
     # ------------------------------------------------------------------
 
     def _compute(self, candidates, nodes) -> Tuple[Optional[object], float]:
         """
-        Find the candidate that minimises the maximum travel time to any node
-        in ``nodes`` (minimax covering radius).
-
-        :returns: ``(best_candidate, radius)``
+        Find the candidate minimising the total demand-weighted travel time
+        ``sum_{v in nodes} d_v * dist(candidate, v)`` (demand-weighted
+        1-median). Returns ``(best_candidate, access_cost)``.
         """
         best_candidate = None
-        best_radius = float("inf")
+        best_cost = float("inf")
+        d = self._demands
 
         for candidate in candidates:
-            radius = max(self._travel_times[(candidate, node)] for node in nodes)
-            if radius < best_radius:
-                best_radius = radius
+            cost = sum(
+                d.get(node, 1.0) * self._travel_times[(candidate, node)]
+                for node in nodes
+            )
+            if cost < best_cost:
+                best_cost = cost
                 best_candidate = candidate
 
-        return best_candidate, best_radius
+        return best_candidate, best_cost
 
     # ------------------------------------------------------------------
     # Public accessors
@@ -123,19 +140,78 @@ class FacilityAssignment:
         return f"<FacilityAssignment [{len(self._centers)} districts]>"
 
 
+def minimax_super_selector(super_id, super_candidates, base_nodes, demands,
+                           travel_times):
+    """
+    Default level-2 facility selector: demand-weighted 1-median over the
+    base-level nodes of the superdistrict.
+
+    Picks the super-candidate minimising the total demand-weighted travel
+    time to every base unit in the superdistrict — the upper-level
+    coordination term of the disaggregated hierarchical median objective:
+
+    .. math::
+
+        \\mathrm{cost}(S, f) \\;=\\; \\sum_{v \\in V^1[S]} d_v \\, \\mathrm{d}(f, v).
+
+    This mirrors the base-level rule (:class:`FacilityAssignment`) one level
+    up: each level's facility is the demand-weighted 1-median of the units
+    it serves, and the two levels are scored separably (paper Section 5.4 /
+    the MILP disaggregated-median objective).
+
+    Returns ``(best_candidate, access_cost)``, or ``(None, inf)`` if
+    ``super_candidates`` or ``base_nodes`` is empty.
+
+    :param super_id: ID of the superdistrict (informational; unused by default).
+    :param super_candidates: Iterable of nodes in F^2 ∩ V(G^1[D^2]).
+    :param base_nodes: Iterable of all base-level nodes in this superdistrict.
+    :param demands: Dict node → demand (unit demand assumed if missing).
+    :param travel_times: Dict (facility_node, node) -> travel time.
+
+    :returns: (best_super_candidate, demand_weighted_access_cost)
+    """
+    best_candidate = None
+    best_cost = float("inf")
+    base = list(base_nodes)
+    if not base:
+        return None, float("inf")
+
+    for candidate in super_candidates:
+        try:
+            cost = sum(
+                demands.get(v, 1.0) * travel_times[(candidate, v)]
+                for v in base
+            )
+        except KeyError:
+            continue
+        if cost < best_cost:
+            best_cost = cost
+            best_candidate = candidate
+
+    return best_candidate, best_cost
+
+
 class SuperFacilityAssignment:
     """
-    Computes level-2 facility centers for superdistricts.
+    Computes level-2 (super-) facility centers for each superdistrict.
 
-    For each superdistrict D_i^2, the level-2 facility is the candidate
-    in F^2 ∩ V(G^1[D_i^2]) that minimises the maximum travel time to any
-    base-level node in D_i^2 (Eq. 18 in the paper).
+    For each superdistrict D^2, the level-2 facility is selected from
+    F^2 ∩ V(G^1[D^2]) — the super-candidates (``super_candidate=1`` nodes)
+    that lie in the base-level subgraph induced by D^2's constituent
+    level-1 districts. Selection is delegated to a pluggable callable
+    (see ``selection_fn``); the default is :func:`minimax_super_selector`
+    (Eq. 18).
 
-    In the current 2-level implementation, F^2 candidates are the level-1
-    facility centers (one per district within each superdistrict).
+    **Soft constraint at level 2.** If a superdistrict contains no
+    super-candidates, no level-2 facility is assigned for it — the entry
+    is simply absent from ``centers`` and ``radii``. The chain is not
+    rejected. Callers can iterate ``state.partition.super_parts`` to
+    detect superdistricts without a level-2 facility.
 
-    :ivar centers: Maps superdistrict ID -> best level-2 facility node.
-    :ivar radii:   Maps superdistrict ID -> covering radius.
+    :ivar centers: Maps superdistrict ID -> selected super-candidate node.
+        May not contain an entry for every superdistrict (soft constraint).
+    :ivar radii:   Maps superdistrict ID -> covering radius (matches the
+        keys of ``centers``).
     """
 
     __slots__ = ("_centers", "_radii")
@@ -145,94 +221,159 @@ class SuperFacilityAssignment:
         self._radii = {}
 
     @classmethod
-    def from_state(cls, state) -> "SuperFacilityAssignment":
+    def from_state(cls, state, selection_fn=None) -> "SuperFacilityAssignment":
         """
-        Build a fully computed SuperFacilityAssignment from a ChainState.
+        Build a SuperFacilityAssignment from a ChainState.
 
-        For each superdistrict (group of level-1 districts that share a
-        supergraph node), find the level-1 center that minimises the max
-        travel time over all base-level nodes in the superdistrict.
+        Iterates ``state.partition.super_parts`` (superdistrict ID -> set
+        of level-1 district IDs), gathers super-candidates and base nodes
+        for each, and delegates the actual selection to ``selection_fn``.
 
-        :param state: A ChainState with facility assignment already computed.
+        :param state: A ChainState whose partition has ``super_assignment``
+            populated and whose ``assignment.travel_times`` is set. The
+            level-1 facility centers in ``state.facility`` must already
+            be populated (they are the "spokes" the L2 facility serves).
+        :param selection_fn: Callable
+            ``(super_id, super_candidates, base_nodes, demands, travel_times) -> (node, cost)``.
+            Defaults to :func:`minimax_super_selector` (demand-weighted
+            1-median over base nodes).
         """
         sfa = cls()
+        if selection_fn is None:
+            selection_fn = minimax_super_selector
+
         travel_times = state.assignment.travel_times
         if travel_times is None:
             return sfa
 
         partition = state.partition
-        level1_centers = state.facility.centers
+        super_parts = partition.super_parts  # super_id -> frozenset of level-1 IDs
+        graph_nodes = partition.graph.nodes  # FrozenGraph node attr access
+        demands = {v: graph_nodes[v]["demand"] for v in partition.graph.nodes}
 
-        # Build superdistrict -> set of level-1 district IDs
-        # A superdistrict in G^2 corresponds to a node whose value is a
-        # set of base-level districts. We read this from the supergraph.
-        supergraph = partition.supergraph
-        if supergraph is None:
+        for super_id, l1_ids in super_parts.items():
+            # Base-level nodes in V(G^1[D^2]): union over level-1 districts in D^2.
+            base_nodes = set()
+            for l1_id in l1_ids:
+                if l1_id in partition.parts:
+                    base_nodes |= partition.parts[l1_id]
+            if not base_nodes:
+                continue
+
+            # Super-candidates inside this superdistrict.
+            super_candidates = [
+                v for v in base_nodes
+                if graph_nodes[v].get("super_candidate", 0)
+            ]
+            if not super_candidates:
+                # Soft constraint: no level-2 facility for this superdistrict.
+                continue
+
+            best, cost = selection_fn(
+                super_id, super_candidates, base_nodes, demands, travel_times
+            )
+            if best is not None:
+                sfa._centers[super_id] = best
+                sfa._radii[super_id] = cost
+
+        return sfa
+
+    @classmethod
+    def updated(
+        cls,
+        previous: "SuperFacilityAssignment",
+        state,
+        selection_fn=None,
+    ) -> "SuperFacilityAssignment":
+        """
+        Build a SuperFacilityAssignment incrementally from ``previous``.
+
+        Mirrors :meth:`FacilityAssignment.updated` at level 2: copies
+        ``previous``'s ``centers`` and ``radii`` and recomputes only the
+        super-districts that changed this step. Unchanged super-districts
+        keep their cached center / radius.
+
+        Cheaper than :meth:`from_state` when the partition's ``superflip``
+        only touches a few super-districts (which is the common case under
+        ``hierarchical_recom`` — exactly one super-district is merged and
+        re-partitioned per step).
+
+        :param previous: The parent state's ``SuperFacilityAssignment``.
+        :param state: The proposed :class:`ChainState`.
+        :param selection_fn: See :meth:`from_state`.
+        """
+        sfa = cls()
+        if selection_fn is None:
+            selection_fn = minimax_super_selector
+
+        partition = state.partition
+        travel_times = state.assignment.travel_times
+        if travel_times is None:
             return sfa
 
-        for supernode in supergraph.nodes:
-            # The level-1 districts in this superdistrict
-            districts_in_super = {
-                d for d in partition.parts
-                if d == supernode or (
-                    hasattr(partition, 'assignment') and
-                    supernode in partition.parts and
-                    d in partition.parts
-                )
-            }
-            # Actually: each supergraph node IS a level-1 district ID.
-            # A superdistrict is a group of supergraph nodes.
-            # But currently supergraph nodes = level-1 district IDs directly.
-            # So for level-2 we need the grouping from the supergraph partition.
-            # For now, each supernode is one level-1 district, so level-2
-            # center = level-1 center of that district.
-            # This will be extended when we have an actual level-2 partition.
-            pass
+        # Carry forward previous entries so the incremental path keeps
+        # the cached values for unchanged super-districts.
+        sfa._centers = previous._centers.copy()
+        sfa._radii = previous._radii.copy()
 
-        # Simple correct approach for |L|=2:
-        # Each superdistrict groups multiple level-1 districts.
-        # The supergraph nodes ARE the level-1 districts.
-        # We need the level-2 partition (which districts form which superdistrict).
-        # This is stored in the superflip / supergraph structure.
-        #
-        # For now: compute over supergraph connected components or
-        # use the supergraph partition if available.
-        # Since the supergraph itself is partitioned by hierarchical_recom,
-        # each superdistrict = set of supergraph nodes in one super-partition.
-        #
-        # The partition stores teams per district. We can group districts
-        # by their super-assignment. But we don't currently store the
-        # super-level assignment explicitly.
-        #
-        # Minimal viable: treat each supergraph node as its own superdistrict
-        # (which is what happens after the supergraph partition step).
-        # The level-2 center is the level-1 center with min max eccentricity
-        # over all base nodes in that superdistrict.
+        # Diff: which super-districts changed?
+        # `superflip.merged_ids` are the *parent's* super-IDs that were
+        # consumed; `superflip.flips` is the new super_assignment, so the
+        # *new* super-IDs are the unique values among the new assignment.
+        superflip = partition.superflip
+        new_super_assignment = (
+            superflip.flips if superflip is not None else {}
+        )
+        new_super_ids = set(new_super_assignment.values())
+        merged_ids = (
+            set(superflip.merged_ids) if superflip is not None else set()
+        )
 
-        for supernode in supergraph.nodes:
-            # Collect all base-level nodes in this superdistrict
-            if supernode not in partition.parts:
+        # Drop super-IDs that no longer exist (parent's super-IDs that
+        # were merged this step but are NOT among the new super-IDs).
+        for sid in merged_ids:
+            if sid not in new_super_ids:
+                sfa._centers.pop(sid, None)
+                sfa._radii.pop(sid, None)
+
+        # Recompute super-IDs that are *new* this step (typically the IDs
+        # produced by the level-2 re-partition for the merged region).
+        # An "unchanged" super-district has the same ID and its constituent
+        # L1 districts haven't changed; its center is still valid.
+        super_parts = partition.super_parts
+        graph_nodes = partition.graph.nodes
+        demands = {v: graph_nodes[v]["demand"] for v in partition.graph.nodes}
+        recompute_ids = (new_super_ids - sfa._centers.keys()) | merged_ids
+        # Also recompute any super-district whose L1 footprint changed
+        # (a parent super-ID that was kept but had its L1 districts
+        # remapped — rare but possible).
+        for sid in recompute_ids & new_super_ids:
+            l1_ids = super_parts.get(sid, frozenset())
+            base_nodes = set()
+            for l1_id in l1_ids:
+                if l1_id in partition.parts:
+                    base_nodes |= partition.parts[l1_id]
+            if not base_nodes:
+                sfa._centers.pop(sid, None)
+                sfa._radii.pop(sid, None)
                 continue
-            base_nodes = partition.parts[supernode]
-
-            # Level-2 candidates = level-1 centers of districts within this superdistrict
-            # But for a single supernode = single level-1 district, the candidate IS
-            # the level-1 center. For grouped superdistricts, we'd iterate over
-            # constituent districts.
-            center = level1_centers.get(supernode)
-            if center is None:
+            super_candidates = [
+                v for v in base_nodes
+                if graph_nodes[v].get("super_candidate", 0)
+            ]
+            if not super_candidates:
+                sfa._centers.pop(sid, None)
+                sfa._radii.pop(sid, None)
                 continue
-
-            # Compute eccentricity: max travel time from center to any base node
-            try:
-                radius = max(
-                    travel_times[(center, node)] for node in base_nodes
-                )
-            except KeyError:
-                radius = float("inf")
-
-            sfa._centers[supernode] = center
-            sfa._radii[supernode] = radius
+            best, cost = selection_fn(
+                sid, super_candidates, base_nodes, demands, travel_times
+            )
+            if best is not None:
+                sfa._centers[sid] = best
+                sfa._radii[sid] = cost
+            else:
+                sfa._centers.pop(sid, None)
+                sfa._radii.pop(sid, None)
 
         return sfa
 

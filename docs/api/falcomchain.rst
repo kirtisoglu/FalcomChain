@@ -75,7 +75,7 @@ falcomchain.markovchain
 
 .. autofunction:: falcomchain.markovchain.accept.always_accept
 
-.. autofunction:: falcomchain.markovchain.accept.metropolis_hastings
+.. autofunction:: falcomchain.markovchain.accept.boltzmann
 
 .. autofunction:: falcomchain.markovchain.energy.compute_energy
 

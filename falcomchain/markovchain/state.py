@@ -29,6 +29,7 @@ class ChainState:
         "beta",
         "feasible",
         "energy_fn",
+        "super_facility_fn",
         "_recorder",
     )
 
@@ -42,6 +43,7 @@ class ChainState:
         feasible: bool,
         super_facility: Optional[SuperFacilityAssignment] = None,
         energy_fn=None,
+        super_facility_fn=None,
     ) -> None:
         self.partition = partition
         self.facility = facility
@@ -51,6 +53,7 @@ class ChainState:
         self.beta = beta
         self.feasible = feasible
         self.energy_fn = energy_fn
+        self.super_facility_fn = super_facility_fn
 
     @classmethod
     def initial(
@@ -59,6 +62,7 @@ class ChainState:
         energy: float,
         beta: float,
         energy_fn=None,
+        super_facility_fn=None,
     ) -> "ChainState":
         """
         Construct the initial ChainState at the start of the chain.
@@ -70,6 +74,12 @@ class ChainState:
         :param beta:      Inverse temperature.
         :param energy_fn: Optional custom energy function(state) -> float.
             Defaults to ``compute_energy`` (demand-weighted travel time).
+        :param super_facility_fn: Optional callable
+            ``(state) -> SuperFacilityAssignment`` that produces the level-2
+            facility assignment. ``None`` (default) means level-2 facilities
+            are not computed; ``state.super_facility`` is ``None`` for the
+            entire chain. Pass ``SuperFacilityAssignment.from_state`` to enable
+            the default Eq. 18 minimax selector, or any custom callable.
         """
         state = cls.__new__(cls)
         state.partition = partition
@@ -77,9 +87,12 @@ class ChainState:
         state.beta = beta
         state.feasible = True
         state.energy_fn = energy_fn
+        state.super_facility_fn = super_facility_fn
         state._recorder = None
         state.facility = FacilityAssignment.from_state(state)
-        state.super_facility = SuperFacilityAssignment.from_state(state)
+        state.super_facility = (
+            super_facility_fn(state) if super_facility_fn is not None else None
+        )
         # Recompute energy using custom function if provided
         if energy_fn is not None:
             state.energy = energy_fn(state)
@@ -96,7 +109,8 @@ class ChainState:
     ) -> "ChainState":
         """
         Construct the proposed ChainState from the current one.
-        Carries beta, energy_fn forward and incrementally updates FacilityAssignment.
+        Carries beta, energy_fn, super_facility_fn forward and incrementally
+        updates FacilityAssignment.
 
         :param partition:          Proposed partition.
         :param energy:             E(s') of the proposed state.
@@ -109,9 +123,28 @@ class ChainState:
         state.beta = self.beta
         state.feasible = feasible
         state.energy_fn = self.energy_fn
+        # Defensive: tolerate parents constructed via __new__ without
+        # super_facility_fn set (e.g., in legacy tests).
+        super_facility_fn = getattr(self, "super_facility_fn", None)
+        state.super_facility_fn = super_facility_fn
         state._recorder = self._recorder
         state.facility = FacilityAssignment.updated(self.facility, state)
-        state.super_facility = SuperFacilityAssignment.from_state(state)
+        # Incremental L2 update when a parent super_facility exists; falls
+        # back to the user-supplied `super_facility_fn` (typically
+        # `SuperFacilityAssignment.from_state`) for the first step or
+        # custom callables.
+        prev_super_facility = getattr(self, "super_facility", None)
+        if (
+            super_facility_fn is SuperFacilityAssignment.from_state
+            and isinstance(prev_super_facility, SuperFacilityAssignment)
+        ):
+            state.super_facility = SuperFacilityAssignment.updated(
+                prev_super_facility, state
+            )
+        else:
+            state.super_facility = (
+                super_facility_fn(state) if super_facility_fn is not None else None
+            )
         # Use custom energy function if set, otherwise use the provided value
         if self.energy_fn is not None:
             state.energy = self.energy_fn(state)

@@ -29,6 +29,20 @@ from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 import networkx as nx
 from networkx.algorithms import tree
 
+# Diagnostic side-channel: when enabled, records (recursion_step,
+# debt_value, tau_1) per iteration of capacitated_recursive_tree.
+# Used by the per-team vs main-rule comparison harness to measure
+# the empirical distribution of |δ|/τ during a chain run.
+# This is debug instrumentation only; chain behaviour is unchanged.
+DEBT_LOG_ENABLED = False
+DEBT_LOG: list = []
+
+# Per-call attempt counter for bipartition_tree. When enabled, every
+# call appends a dict {attempts: int, success: bool, supergraph: bool}.
+# Used to count rejections in the rule comparison harness.
+ATTEMPT_LOG_ENABLED = False
+ATTEMPT_LOG: list = []
+
 from falcomchain.random import rng
 
 from falcomchain.helper import save_pickle
@@ -74,6 +88,7 @@ class SpanningTree:
         "supertree",
         "tot_candidates",
         "candidate_nodes",
+        "node_demands",
         "params",
     )
 
@@ -94,6 +109,13 @@ class SpanningTree:
             self.root = rng.choice(internal_nodes)
         else:
             self.root = rng.choice(list(self.graph.nodes))
+
+        # Record ORIGINAL per-node demand before accumulation overwrites the
+        # "demand" field with subtree totals. Needed for the demand-weighted
+        # 1-median geometric penalty η (paper Section 5.4).
+        self.node_demands = {
+            node: self.graph.nodes[node]["demand"] for node in self.graph.nodes
+        }
 
         if self.supertree:
             self.candidate_nodes = frozenset()
@@ -125,6 +147,10 @@ class SpanningTree:
         return self.params.capacity_level
 
     @property
+    def c_min(self):
+        return self.params.c_min
+
+    @property
     def n_teams(self):
         return self.params.n_teams
 
@@ -136,17 +162,55 @@ class SpanningTree:
         return {a: b for a, b in nx.bfs_successors(self.graph, self.root)}
 
     def has_ideal_demand(self, assign_team, pop):
+        if self.params.rule == "main":
+            # Paper §5.3 main rule with capacity-scaled tolerance and
+            # active debt correction. τ(c) = ε·c·d̄ matches the global-
+            # balance gate at c=c_max. The window keeps width 2·τ(c) but
+            # is *shifted* by 2δ in the corrective direction: when prior
+            # extractions over-shot (δ > 0), U is pulled down by 2δ to
+            # force the next district to undershoot; symmetrically for
+            # δ < 0. This caps |δ| at τ_min/2 by construction.
+            c = assign_team
+            d_bar = self.ideal_demand
+            tau = self.epsilon * c * d_bar
+            debt = self.params.debt
+            L = c * d_bar - tau + 2.0 * max(-debt, 0.0)
+            U = c * d_bar + tau - 2.0 * max(debt, 0.0)
+            return L <= pop <= U
         return abs(pop - assign_team * self.ideal_demand) <= self.ideal_demand * self.epsilon
 
     def complement_has_the_ideal_demand(self, assign_team, pop):
+        # Same role as has_ideal_demand but for the complement T_{u'} taking
+        # the same assign_team count (used in one_sided_cut).
+        complement_demand = self.total_demand - pop
+        if self.params.rule == "main":
+            c = assign_team
+            d_bar = self.ideal_demand
+            tau = self.epsilon * c * d_bar
+            debt = self.params.debt
+            L = c * d_bar - tau + 2.0 * max(-debt, 0.0)
+            U = c * d_bar + tau - 2.0 * max(debt, 0.0)
+            return L <= complement_demand <= U
         return (
-            abs((self.total_demand - pop) - assign_team * self.ideal_demand)
+            abs(complement_demand - assign_team * self.ideal_demand)
             <= self.ideal_demand * self.epsilon
         )
 
     def complement_has_ideal_demand_too(self, assign_team, pop):
+        # Two-sided check: the complement takes (n_teams - assign_team)
+        # teams. Both halves of the cut must be balanced.
+        complement_capacity = self.n_teams - assign_team
+        complement_demand = self.total_demand - pop
+        if self.params.rule == "main":
+            c = complement_capacity
+            d_bar = self.ideal_demand
+            tau = self.epsilon * c * d_bar
+            debt = self.params.debt
+            L = c * d_bar - tau + 2.0 * max(-debt, 0.0)
+            U = c * d_bar + tau - 2.0 * max(debt, 0.0)
+            return L <= complement_demand <= U
         return (
-            abs((self.total_demand - pop) - (self.n_teams - assign_team) * self.ideal_demand)
+            abs(complement_demand - complement_capacity * self.ideal_demand)
             <= self.ideal_demand * self.epsilon
         )
 
@@ -228,8 +292,16 @@ class SpanningTree:
 
     def _demand_radius(self, node) -> float:
         """
-        Compute r(T_u) = min_{f in F ∩ T_u} e(f, T_u) where
-        e(f, T_u) = max_{v in T_u} dist(f, v).
+        Geometric penalty η¹(T_u): the demand-weighted MEAN distance from the
+        subtree's demand-weighted 1-median to its nodes,
+
+            η¹(T_u) = ( min_{f∈F¹∩T_u} Σ_{v∈T_u} d_v·dist(f,v) ) / Σ_{v∈T_u} d_v.
+
+        This is the per-capita access cost of the best-located candidate — the
+        median analogue of the old minimax covering radius — and is the
+        quantity the disaggregated-median objective minimises (paper Section
+        5.4). Normalising by subtree demand keeps η scale-free so it is
+        comparable across cuts of different sizes inside exp(-γ·η).
 
         Falls back to 1/phi when travel_times is not available.
         """
@@ -244,17 +316,21 @@ class SpanningTree:
         if not candidates_in_subtree:
             return float("inf")
 
-        # r(T_u) = min over candidates f of (max over nodes v in T_u of dist(f,v))
-        best_radius = float("inf")
+        total_demand = sum(self.node_demands.get(v, 1.0) for v in subtree_nodes)
+        if total_demand <= 0:
+            return float("inf")
+
+        # min over candidates f of demand-weighted total distance; normalise.
+        best_cost = float("inf")
         for f in candidates_in_subtree:
-            eccentricity = max(
-                travel_times.get((f, v), float("inf"))
+            cost = sum(
+                self.node_demands.get(v, 1.0) * travel_times.get((f, v), float("inf"))
                 for v in subtree_nodes
             )
-            if eccentricity < best_radius:
-                best_radius = eccentricity
+            if cost < best_cost:
+                best_cost = cost
 
-        return best_radius
+        return best_cost / total_demand
 
 
 def accumulate_tree(tree: SpanningTree, accumulation_columns):
@@ -429,7 +505,37 @@ class CutParams:
     gamma: float = 0.0
     travel_times: Optional[Dict] = None
     psi_fn: Optional[Any] = None  # Callable[[int, float, float], float]
+    # Minimum capacity per district (paper c^ℓ_min). Districts with team
+    # count below this are not admissible. Default 1 preserves the
+    # original behavior. Setting c_min > 1 lets users opt into a stricter
+    # algorithm with looser Assumption 6.1 (since the smallest valid
+    # district has demand (1−ε)·c_min·d̄ rather than (1−ε)·d̄).
+    c_min: int = 1
+    # Level-2 (supergraph) cut score. Called as ``super_psi_fn(subnodes, teams)
+    # -> float`` and used by ``find_superedge_cuts`` when set. When ``None``,
+    # the supergraph cut score falls back to the team-count formula
+    # (paper's γ=0 case). See ``hub_coherence_psi_factory`` in
+    # ``falcomchain.markovchain.super_scoring`` for the paper's Eq. 27 default.
+    super_psi_fn: Optional[Any] = None  # Callable[[frozenset, int], float]
     recorder: Optional[Any] = None  # Recorder instance for substep recording
+    # Admissibility rule. "per_team" (default) preserves current
+    # behaviour: clip per-team interval, derive (d^(r), ε_r), check
+    # |pop − c·d^(r)| ≤ d^(r)·ε_r. "main" applies the paper §5.3 main
+    # rule directly: check pop ∈ [L^(r)(c), U^(r)(c)] where the window
+    # has half-width τ = epsilon·ideal_demand and centre c·ideal_demand,
+    # with debt asymmetrically pinning one bound. Under "main",
+    # ideal_demand is interpreted as d̄ (unclipped) and `debt` carries
+    # δ^(r-1) from the recursion.
+    rule: str = "per_team"
+    debt: float = 0.0
+    # Minimum number of level-1 districts per super-district (paper's
+    # min-L1-per-L2). Enforced only at the supergraph level by
+    # ``find_superedge_cuts``: a super-cut is admissible only if BOTH it
+    # and its complement contain at least this many supergraph nodes
+    # (= L1 districts). Default 1 preserves the legacy behaviour where a
+    # single c¹≥c²_min district could form a super-district on its own.
+    # Set to 2 to match the MIP's ``min_l1_per_l2 = 2``.
+    min_districts_super: int = 1
 
 
 @dataclass(frozen=True)
@@ -450,7 +556,7 @@ def two_sided_cut(h: SpanningTree, density_check) -> List[Cut]:
 
     for node in nodes:
         pop = h.graph.nodes[node]["demand"]
-        for assign_team in range(1, min(h.capacity_level + 1, h.n_teams + 1)):
+        for assign_team in range(h.c_min, min(h.capacity_level + 1, h.n_teams + 1)):
 
             if h.has_ideal_demand(assign_team, pop):
                 if node == h.root:
@@ -499,7 +605,7 @@ def one_sided_cut(h: SpanningTree, density_check):
     for node in nodes:
         pop = h.graph.nodes[node]["demand"]
 
-        for assign_team in range(1, min(h.capacity_level + 1, h.n_teams + 1)):
+        for assign_team in range(h.c_min, min(h.capacity_level + 1, h.n_teams + 1)):
             if h.has_ideal_demand(assign_team, pop) and h.has_facility(node):
                 cuts.append(
                     Cut(
@@ -564,80 +670,130 @@ def find_edge_cuts(h: SpanningTree, density_check: Optional[float] = None) -> Li
 def find_superedge_cuts(
     h: SpanningTree,
     density_check=None,
-) -> List[Cut]:  # always two-sided
+) -> List[Cut]:
     """
-    This function takes a SpanningTree object as input and returns a list of balanced edge cuts.
-    A balanced edge cut is defined as a cut that divides the graph into two subsets, such that
-    the demand of each subset is close to the ideal demand defined by the SpanningTree object.
+    Find admissible cuts on the spanning tree of a supergraph.
 
-    :param h: The SpanningTree object representing the graph.
-    :param add_root: If set to True, an artifical node is connected to root and edge is considered as a possible cut.
+    Admissibility uses the team-count balance condition (paper Eq. 13/14
+    at level 2). The cut score ψ²(T_u) is computed by ``h.params.super_psi_fn``
+    when set — the paper's hub-coherence penalty (Eq. 27) plugged in via
+    :func:`falcomchain.markovchain.super_scoring.hub_coherence_psi_factory`.
+    When ``super_psi_fn`` is ``None``, falls back to ϕ²(T_u) = teams (paper's
+    γ=0 case).
 
-    :returns: A list of balanced edge cuts.
+    :param h: The SpanningTree object representing the supergraph.
+    :returns: A list of admissible cuts (each with positive ψ²).
     """
     cuts = []
     nodes = h.graph.nodes
+    super_psi_fn = h.params.super_psi_fn
+
+    def _phi(subnodes, teams):
+        """ϕ²(T_u) = teams (paper Eq. 21 with fac²=1) when no custom scorer."""
+        return float(teams)
+
+    # At the supergraph level, c_min is c²_min (= 2·c¹_min by convention,
+    # verified in hierarchical_recom). The lower bound applies to BOTH the
+    # leaf side (`teams`) and, in the one-sided branch, to its complement.
+    c_min = h.c_min
+    # Minimum L1 districts per super-district. At the supergraph level each
+    # tree node IS one L1 district, so the district count of a super-cut is
+    # the number of supergraph nodes in it.
+    min_d = h.params.min_districts_super
+    n_super_nodes = len(nodes)
 
     for node in nodes:
         teams = nodes[node]["n_teams"]
         pop = nodes[node]["demand"]
 
-        # print("-------------------------")
-        # print("supernode", node)
-        # print("number of teams in the super subtree", teams)
-        # print("demand of the super subtree", pop)
-        # print("total demand of the subtree", h.total_demand)
-        # print("capacity level", h.capacity_level)
-        # print("ideal demand", h.ideal_demand)
-        # print("epsilon", h.epsilon)
-
         if h.two_sided:
             if (
-                teams >= 2
+                teams >= c_min
                 and abs(pop - teams * h.ideal_demand) <= h.ideal_demand * teams * h.epsilon
             ):
+                subtree_set = _part_nodes(h.successors, node)
+                leaf_count = len(subtree_set)
+                complement_count = n_super_nodes - leaf_count
+                # Leaf must have >= min_d districts. If not the root cut
+                # (which takes the whole tree as one super), the complement
+                # must too.
+                if leaf_count < min_d:
+                    continue
+                if node != h.root and complement_count < min_d:
+                    continue
                 if (
                     node == h.root
                     or abs((h.total_demand - pop) - (h.n_teams - teams) * h.ideal_demand)
                     <= h.ideal_demand * (h.n_teams - teams) * h.epsilon
                 ):
-                    # Supergraph: ψ = teams × complement_teams (product of team counts)
+                    subnodes = frozenset(subtree_set)
+                    psi = (
+                        super_psi_fn(subnodes, teams)
+                        if super_psi_fn is not None
+                        else _phi(subnodes, teams)
+                    )
                     cuts.append(
                         Cut(
                             node=node,
-                            subnodes=frozenset(_part_nodes(h.successors, node)),
+                            subnodes=subnodes,
                             assigned_teams=teams,
                             demand=pop,
-                            psi=float(teams * (h.n_teams - teams)),
+                            psi=psi,
                         )
                     )
         else:  # one sided
-            if (2 <= teams <= h.capacity_level) and abs(
+            subtree_set = _part_nodes(h.successors, node)
+            leaf_count = len(subtree_set)
+            complement_count = n_super_nodes - leaf_count
+            if (c_min <= teams <= h.capacity_level) and abs(
                 pop - teams * h.ideal_demand
-            ) <= h.ideal_demand * teams * h.epsilon:
+            ) <= h.ideal_demand * teams * h.epsilon and leaf_count >= min_d:
+                subnodes = frozenset(subtree_set)
+                psi = (
+                    super_psi_fn(subnodes, teams)
+                    if super_psi_fn is not None
+                    else _phi(subnodes, teams)
+                )
                 cuts.append(
                     Cut(
                         node=node,
-                        subnodes=frozenset(_part_nodes(h.successors, node)),
+                        subnodes=subnodes,
                         assigned_teams=teams,
                         demand=pop,
-                        psi=float(teams),
+                        psi=psi,
                     )
                 )
-            elif (2 <= h.n_teams - teams <= h.capacity_level) and abs(
-                (h.total_demand - pop) - teams * h.ideal_demand
-            ) <= h.ideal_demand * h.epsilon:
-                cuts.append(
-                    Cut(
-                        node=node,
-                        subnodes=frozenset(
-                            set(nodes) - _part_nodes(h.successors, node)
-                        ),
-                        assigned_teams=teams,
-                        demand=(h.total_demand - pop),
-                        psi=float(h.n_teams - teams),
+            else:
+                # Complement-side branch: this node's subtree is not admissible
+                # as the leaf, but the COMPLEMENT (the "rest" of the tree) might
+                # be. Demand and team-count constraints must use the complement's
+                # totals, not the leaf-side `teams` / `pop`.
+                complement_teams = h.n_teams - teams
+                complement_pop = h.total_demand - pop
+                if (
+                    c_min <= complement_teams <= h.capacity_level
+                    and abs(
+                        complement_pop - complement_teams * h.ideal_demand
+                    ) <= h.ideal_demand * complement_teams * h.epsilon
+                    and complement_count >= min_d
+                ):
+                    subnodes = frozenset(
+                        set(nodes) - subtree_set
                     )
-                )
+                    psi = (
+                        super_psi_fn(subnodes, complement_teams)
+                        if super_psi_fn is not None
+                        else _phi(subnodes, complement_teams)
+                    )
+                    cuts.append(
+                        Cut(
+                            node=node,
+                            subnodes=subnodes,
+                            assigned_teams=complement_teams,
+                            demand=complement_pop,
+                            psi=psi,
+                        )
+                    )
     return cuts
 
 
@@ -658,7 +814,15 @@ def bipartition_tree(
     gamma: float = 0.0,
     travel_times=None,
     psi_fn=None,
+    super_psi_fn=None,
     recorder=None,
+    c_min: int = 1,
+    rule: str = "per_team",
+    debt: float = 0.0,
+    enforce_global_balance: bool = False,
+    tau_global: Optional[float] = None,
+    d_bar_orig: Optional[float] = None,
+    min_districts_super: int = 1,
 ) -> Cut:
     """
     Finds a balanced 2-partition of a graph by drawing a spanning tree and
@@ -676,7 +840,12 @@ def bipartition_tree(
         Defaults to ``uniform_spanning_tree`` (Wilson's algorithm).
     :param gamma: Candidate-awareness tuning parameter (>= 0). Default 0 (uniform).
     :param travel_times: Dict (facility, node) -> travel time for psi computation.
-    :param psi_fn: Optional custom scoring function(phi, gamma, radius) -> float.
+    :param psi_fn: Optional level-1 scoring function ``(phi, gamma, radius) -> float``.
+    :param super_psi_fn: Optional level-2 scoring function
+        ``(subnodes, teams) -> float`` used by ``find_superedge_cuts`` when
+        ``supergraph=True``. Defaults to ϕ²(T_u) = teams (paper γ=0 case).
+        See :mod:`falcomchain.markovchain.super_scoring` for the paper's
+        Eq. 27 hub-coherence factory.
     :param max_attempts: Maximum spanning tree samples before giving up.
     :param allow_pair_reselection: If True, raise ReselectException instead of RuntimeError.
 
@@ -686,7 +855,7 @@ def bipartition_tree(
     if tree_sampler is None:
         tree_sampler = uniform_spanning_tree
 
-    for _ in range(max_attempts):
+    for _attempt_idx in range(max_attempts):
 
         spanning_tree = tree_sampler(graph)
 
@@ -701,7 +870,12 @@ def bipartition_tree(
                 gamma=gamma,
                 travel_times=travel_times,
                 psi_fn=psi_fn,
+                super_psi_fn=super_psi_fn,
                 recorder=recorder,
+                c_min=c_min,
+                rule=rule,
+                debt=debt,
+                min_districts_super=min_districts_super,
             ),
             supergraph=supergraph,
         )
@@ -712,6 +886,23 @@ def bipartition_tree(
             possible_cuts = find_superedge_cuts(h)
 
         possible_cuts = [c for c in possible_cuts if c.psi > 0]
+        if (
+            enforce_global_balance
+            and possible_cuts
+            and tau_global is not None
+            and d_bar_orig is not None
+        ):
+            # Reject cuts whose demand falls outside the paper's global
+            # balance window I(c) = [c·d̄_orig − τ_global, c·d̄_orig + τ_global]
+            # with τ_global = ε_orig · c_max · d̄_orig (paper convention).
+            # `tau_global` and `d_bar_orig` are supplied by the caller using
+            # the ORIGINAL ε and d̄, NOT the per-team-clipped values that
+            # bipartition_tree itself sees as `demand_target` / `epsilon`.
+            # Under the main rule, [L,U] ⊆ I(c) so this filter is a no-op.
+            possible_cuts = [
+                c_ for c_ in possible_cuts
+                if abs(c_.demand - c_.assigned_teams * d_bar_orig) <= tau_global
+            ]
         if possible_cuts:
             total_psi = sum(c.psi for c in possible_cuts)
             weights = [c.psi / total_psi for c in possible_cuts]
@@ -732,7 +923,24 @@ def bipartition_tree(
                     extracted_nodes=chosen.subnodes,
                 )
 
+            if ATTEMPT_LOG_ENABLED:
+                ATTEMPT_LOG.append({
+                    "attempts": _attempt_idx + 1,
+                    "success": True,
+                    "supergraph": bool(supergraph),
+                    "rule": rule,
+                    "capacity": int(chosen.assigned_teams),
+                    "demand": float(chosen.demand),
+                })
             return chosen, log_cut_ratio
+
+    if ATTEMPT_LOG_ENABLED:
+        ATTEMPT_LOG.append({
+            "attempts": max_attempts,
+            "success": False,
+            "supergraph": bool(supergraph),
+            "rule": rule,
+        })
 
     if allow_pair_reselection:
         raise ReselectException(
@@ -790,9 +998,17 @@ def capacitated_recursive_tree(
     assignments=None,
     merged_ids=None,
     max_id=0,
-    debt=None,
     iteration=0,
     recorder=None,
+    super_psi_fn=None,
+    c_min: int = 1,
+    max_attempts: int = 5000,
+    gamma: float = 0.0,
+    travel_times=None,
+    psi_fn=None,
+    rule: str = "per_team",
+    enforce_global_balance: bool = False,
+    min_districts_super: int = 1,
 ) -> Flip:
     """
      Recursively partitions a graph into balanced districts using bipartition_tree.
@@ -848,12 +1064,60 @@ def capacitated_recursive_tree(
 
         two_sided = remaining_teams <= capacity_level
 
-        # if two_sided==False:
-        min_demand = max(demand_target * (1 - epsilon), demand_target * (1 - epsilon) - debt)
-        max_demand = min(demand_target * (1 + epsilon), demand_target * (1 + epsilon) - debt)
+        if supergraph:
+            # At the supergraph level, super-node demands are pinned at
+            # ≈ c¹·w (one super-node = one L1 district carrying its
+            # team-times-w workload). Debt adjustment was designed for
+            # the base graph where individual node demands vary widely
+            # and accumulated drift needs correcting. On the supergraph
+            # the debt-adjusted window slides off the super-node scale
+            # and admissible cuts disappear after the first few peels —
+            # the recursion exhausts max_attempts without ever finding
+            # a feasible cut. Skip the debt term here and use the fixed
+            # window throughout.
+            new_demand_target = demand_target
+            new_epsilon = epsilon
+        elif rule == "main":
+            # Paper §5.3 main rule: pass (d̄, ε, debt) through to
+            # bipartition_tree; admissibility uses [L^(r)(c), U^(r)(c)]
+            # with half-width τ = ε·d̄ and asymmetric debt shift.
+            new_demand_target = demand_target
+            new_epsilon = epsilon
+            if DEBT_LOG_ENABLED:
+                DEBT_LOG.append({
+                    "step": iteration,
+                    "recursion": len(current_flips),
+                    "debt": float(debt),
+                    "tau_1": float(epsilon * demand_target),
+                    "demand_target": float(demand_target),
+                    "supergraph": bool(supergraph),
+                    "rule": "main",
+                })
+        else:
+            # Per-team rule (legacy, inherited from GerryChain's
+            # recursive_tree_part). Clip per-team interval, derive
+            # (d^(r), ε^(r)).
+            min_demand = max(
+                demand_target * (1 - epsilon),
+                demand_target * (1 - epsilon) - debt,
+            )
+            max_demand = min(
+                demand_target * (1 + epsilon),
+                demand_target * (1 + epsilon) - debt,
+            )
+            new_demand_target = (min_demand + max_demand) / 2
+            new_epsilon = (max_demand - min_demand) / (2 * new_demand_target)
 
-        new_demand_target = (min_demand + max_demand) / 2
-        new_epsilon = (max_demand - min_demand) / (2 * new_demand_target)
+            if DEBT_LOG_ENABLED:
+                DEBT_LOG.append({
+                    "step": iteration,
+                    "recursion": len(current_flips),
+                    "debt": float(debt),
+                    "tau_1": float(epsilon * demand_target),
+                    "demand_target": float(demand_target),
+                    "supergraph": bool(supergraph),
+                    "rule": "per_team",
+                })
 
         # else:
         #    new_demand_target=1500
@@ -874,6 +1138,20 @@ def capacitated_recursive_tree(
                 density=density,
                 iteration=iteration,
                 recorder=recorder,
+                super_psi_fn=super_psi_fn,
+                c_min=c_min,
+                max_attempts=max_attempts,
+                gamma=gamma,
+                travel_times=travel_times,
+                psi_fn=psi_fn,
+                rule=rule if not supergraph else "per_team",
+                debt=debt if not supergraph else 0.0,
+                enforce_global_balance=enforce_global_balance and not supergraph,
+                tau_global=(epsilon * capacity_level * demand_target)
+                            if (enforce_global_balance and not supergraph) else None,
+                d_bar_orig=demand_target
+                            if (enforce_global_balance and not supergraph) else None,
+                min_districts_super=min_districts_super if supergraph else 1,
             )
 
         except Exception:

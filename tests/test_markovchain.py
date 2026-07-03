@@ -1,6 +1,6 @@
 """
 Tests for:
-  - falcomchain/markovchain/accept.py   (always_accept, metropolis_hastings)
+  - falcomchain/markovchain/accept.py   (always_accept, boltzmann)
   - falcomchain/markovchain/state.py    (ChainState)
   - falcomchain/markovchain/energy.py   (compute_energy, compute_energy_delta)
   - falcomchain/partition/flows.py      (Flow)
@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from falcomchain.markovchain.accept import always_accept, metropolis_hastings
+from falcomchain.markovchain.accept import (
+    always_accept,
+    boltzmann,
+    soft_constraint_accept,
+)
 from falcomchain.markovchain.energy import compute_energy, compute_energy_delta
 from falcomchain.markovchain.state import ChainState
 from falcomchain.partition.flows import Flow
@@ -73,8 +77,12 @@ def _make_facility(centers=None, radii=None):
     return SimpleNamespace(centers=centers, radii=radii)
 
 
+_NOOP_ENERGY_FN = lambda s: 0.0  # for Boltzmann tests that don't care about the value
+
+
 def _make_state(energy=0.0, beta=1.0, log_proposal_ratio=0.0,
-                feasible=True, partition=None, facility=None):
+                feasible=True, partition=None, facility=None,
+                energy_fn=None):
     """Build a ChainState via __new__ to bypass normal construction."""
     state = ChainState.__new__(ChainState)
     state.partition = partition or _make_partition()
@@ -84,7 +92,7 @@ def _make_state(energy=0.0, beta=1.0, log_proposal_ratio=0.0,
     state.log_proposal_ratio = log_proposal_ratio
     state.beta = beta
     state.feasible = feasible
-    state.energy_fn = None
+    state.energy_fn = energy_fn
     state._recorder = None
     return state
 
@@ -132,46 +140,203 @@ class TestAlwaysAccept:
         assert always_accept(proposed, current) is True
 
 
-class TestMetropolisHastings:
+class TestBoltzmann:
+    """Boltzmann acceptance tests. All states use a stub ``energy_fn``
+    so they pass the opt-in check; ``test_raises_when_energy_fn_unset``
+    covers the missing-objective error path."""
+
     def test_rejects_infeasible(self):
-        proposed = _make_state(feasible=False)
-        current = _make_state()
-        assert metropolis_hastings(proposed, current) is False
+        proposed = _make_state(feasible=False, energy_fn=_NOOP_ENERGY_FN)
+        current = _make_state(energy_fn=_NOOP_ENERGY_FN)
+        assert boltzmann(proposed, current) is False
 
     def test_accepts_when_beta_zero(self):
-        proposed = _make_state(energy=1e6, beta=0.0)
-        current = _make_state(energy=0.0, beta=0.0)
-        assert metropolis_hastings(proposed, current) is True
+        proposed = _make_state(energy=1e6, beta=0.0, energy_fn=_NOOP_ENERGY_FN)
+        current = _make_state(energy=0.0, beta=0.0, energy_fn=_NOOP_ENERGY_FN)
+        assert boltzmann(proposed, current) is True
 
     def test_always_accepts_lower_energy(self):
-        # lower energy → positive log_alpha → always accepted
-        proposed = _make_state(energy=0.0, beta=1.0)
-        current = _make_state(energy=100.0, beta=1.0)
-        # log_alpha = -1*(0-100) + 0 = 100 >> 0, so log(random()) <= 100 always
-        accepted = metropolis_hastings(proposed, current)
-        assert accepted is True
+        proposed = _make_state(energy=0.0, beta=1.0, energy_fn=_NOOP_ENERGY_FN)
+        current = _make_state(energy=100.0, beta=1.0, energy_fn=_NOOP_ENERGY_FN)
+        # log_alpha = -1 * (0 - 100) = 100 ≫ 0, so log(random()) ≤ 100 always
+        assert boltzmann(proposed, current) is True
 
     def test_always_rejects_infinite_energy_increase(self):
-        proposed = _make_state(energy=1e300, beta=1.0)
-        current = _make_state(energy=0.0, beta=1.0)
-        # log_alpha = -1e300, math.log(random()) is at most ~0 > -1e300 is false
+        proposed = _make_state(energy=1e300, beta=1.0, energy_fn=_NOOP_ENERGY_FN)
+        current = _make_state(energy=0.0, beta=1.0, energy_fn=_NOOP_ENERGY_FN)
         with patch("falcomchain.markovchain.accept.rng.random", return_value=0.5):
-            result = metropolis_hastings(proposed, current)
+            result = boltzmann(proposed, current)
         assert result is False
 
-    def test_log_proposal_ratio_shifts_acceptance(self):
-        # Equal energy but large positive log_proposal_ratio → accepts
-        proposed = _make_state(energy=10.0, beta=1.0, log_proposal_ratio=100.0)
-        current = _make_state(energy=10.0, beta=1.0)
-        assert metropolis_hastings(proposed, current) is True
+    def test_log_proposal_ratio_is_ignored(self):
+        # boltzmann deliberately drops the proposal-ratio term — see
+        # the docstring for why. Verify the field has no effect.
+        with_pos_ratio = _make_state(
+            energy=10.0, beta=1.0, log_proposal_ratio=100.0,
+            energy_fn=_NOOP_ENERGY_FN,
+        )
+        with_neg_ratio = _make_state(
+            energy=10.0, beta=1.0, log_proposal_ratio=-1e300,
+            energy_fn=_NOOP_ENERGY_FN,
+        )
+        current = _make_state(energy=10.0, beta=1.0, energy_fn=_NOOP_ENERGY_FN)
+        # ΔE=0, β=1 → log_alpha=0; log(random()) ≤ 0 always (random() ≤ 1).
+        assert boltzmann(with_pos_ratio, current) is True
+        assert boltzmann(with_neg_ratio, current) is True
 
-    def test_log_proposal_ratio_negative_inhibits_acceptance(self):
-        # Equal energy but large negative log_proposal_ratio → rejects
-        proposed = _make_state(energy=10.0, beta=1.0, log_proposal_ratio=-1e300)
-        current = _make_state(energy=10.0, beta=1.0)
-        with patch("falcomchain.markovchain.accept.rng.random", return_value=0.5):
-            result = metropolis_hastings(proposed, current)
-        assert result is False
+    def test_raises_when_energy_fn_unset(self):
+        # FalCom is a sampler by default. Calling boltzmann without an
+        # objective would silently degrade to always_accept; we raise instead.
+        proposed = _make_state(energy=0.0, beta=1.0, energy_fn=None)
+        current = _make_state(energy=0.0, beta=1.0, energy_fn=None)
+        with pytest.raises(RuntimeError, match="energy_fn"):
+            boltzmann(proposed, current)
+
+
+# ---------------------------------------------------------------------------
+# soft_constraint_accept
+# ---------------------------------------------------------------------------
+
+class TestSoftConstraintAccept:
+    def test_passes_through_when_violation_zero(self):
+        accept = soft_constraint_accept(
+            violation_fn=lambda s: 0.0, beta_feas=10.0
+        )
+        proposed = _make_state()
+        current = _make_state()
+        # Run repeatedly: with violation 0 should always accept (matches base).
+        for _ in range(50):
+            assert accept(proposed, current) is True
+
+    def test_rejects_more_with_higher_beta(self):
+        # Same large violation; higher beta_feas → lower acceptance rate.
+        from falcomchain.random import set_seed
+        violation_fn = lambda s: 1.0  # noqa: E731
+        proposed = _make_state()
+        current = _make_state()
+
+        accept_low = soft_constraint_accept(violation_fn, beta_feas=0.1)
+        accept_high = soft_constraint_accept(violation_fn, beta_feas=5.0)
+
+        set_seed(42)
+        n_low = sum(accept_low(proposed, current) for _ in range(500))
+        set_seed(42)
+        n_high = sum(accept_high(proposed, current) for _ in range(500))
+        assert n_high < n_low
+
+    def test_zero_beta_recovers_base_accept(self):
+        accept = soft_constraint_accept(
+            violation_fn=lambda s: 100.0, beta_feas=0.0
+        )
+        proposed = _make_state()
+        current = _make_state()
+        # beta_feas=0 → always accept regardless of violation
+        for _ in range(50):
+            assert accept(proposed, current) is True
+
+    def test_respects_base_accept_rejection(self):
+        rejecting = lambda p, c: False  # noqa: E731
+        accept = soft_constraint_accept(
+            violation_fn=lambda s: 0.0, beta_feas=10.0,
+            base_accept=rejecting,
+        )
+        proposed = _make_state()
+        current = _make_state()
+        for _ in range(20):
+            assert accept(proposed, current) is False
+
+    def test_rejects_negative_beta(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            soft_constraint_accept(violation_fn=lambda s: 0.0, beta_feas=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# compute_artificial_facility_penalty
+# ---------------------------------------------------------------------------
+
+class TestArtificialFacilityPenalty:
+    def _state_with_artificial(self, *, art_centers, real_centers):
+        """State with `art_centers` artificial-flagged candidates and
+        `real_centers` real ones, all assigned as facility centers."""
+        from falcomchain.markovchain.energy import (
+            compute_artificial_facility_penalty,
+        )
+        # Build graph_nodes such that art_centers have candidate_artificial=1
+        all_centers = list(art_centers) + list(real_centers)
+        graph_nodes = {}
+        for n in all_centers:
+            graph_nodes[n] = {
+                "demand": 10,
+                "candidate": 1,
+                "candidate_artificial": 1 if n in art_centers else 0,
+            }
+        # Need at least 2 nodes per district; pad with non-candidate nodes
+        for i, c in enumerate(all_centers, start=100):
+            graph_nodes[i] = {"demand": 10, "candidate": 0}
+
+        parts = {
+            d: frozenset([c, 100 + i])
+            for i, (d, c) in enumerate(
+                zip(range(1, len(all_centers) + 1), all_centers)
+            )
+        }
+        mapping = {n: d for d, ns in parts.items() for n in ns}
+        candidates = {d: frozenset({c}) for d, c in zip(parts, all_centers)}
+        teams = {d: 1 for d in parts}
+        partition = _make_partition(
+            parts=parts, mapping=mapping, candidates=candidates,
+            teams=teams, graph_nodes=graph_nodes,
+        )
+        centers = {d: c for d, c in zip(parts, all_centers)}
+        radii = {d: 1.0 for d in parts}
+        facility = _make_facility(centers=centers, radii=radii)
+        state = _make_state(partition=partition, facility=facility)
+        return state, compute_artificial_facility_penalty
+
+    def test_zero_when_no_artificial(self):
+        state, fn = self._state_with_artificial(
+            art_centers=[], real_centers=[1, 2, 3]
+        )
+        assert fn(state, lambda_pen=10.0) == 0.0
+
+    def test_counts_artificial_districts(self):
+        state, fn = self._state_with_artificial(
+            art_centers=[10, 20], real_centers=[1, 2, 3]
+        )
+        assert fn(state, lambda_pen=1.0) == 2.0
+        assert fn(state, lambda_pen=5.0) == 10.0
+
+    def test_zero_lambda_returns_zero(self):
+        state, fn = self._state_with_artificial(
+            art_centers=[10, 20, 30], real_centers=[]
+        )
+        assert fn(state, lambda_pen=0.0) == 0.0
+
+    def test_custom_attr_name(self):
+        from falcomchain.markovchain.energy import (
+            compute_artificial_facility_penalty,
+        )
+        graph_nodes = {
+            1: {"demand": 10, "candidate": 1, "is_synthetic": 1},
+            2: {"demand": 10, "candidate": 1, "is_synthetic": 0},
+            100: {"demand": 10, "candidate": 0},
+            101: {"demand": 10, "candidate": 0},
+        }
+        parts = {1: frozenset([1, 100]), 2: frozenset([2, 101])}
+        mapping = {1: 1, 100: 1, 2: 2, 101: 2}
+        candidates = {1: frozenset([1]), 2: frozenset([2])}
+        partition = _make_partition(
+            parts=parts, mapping=mapping, candidates=candidates,
+            teams={1: 1, 2: 1}, graph_nodes=graph_nodes,
+        )
+        facility = _make_facility(centers={1: 1, 2: 2}, radii={1: 1.0, 2: 1.0})
+        state = _make_state(partition=partition, facility=facility)
+        # default attr 'candidate_artificial' isn't set → 0
+        assert compute_artificial_facility_penalty(state, lambda_pen=10.0) == 0.0
+        # custom attr finds the synthetic flag
+        assert compute_artificial_facility_penalty(
+            state, lambda_pen=10.0, artificial_attr="is_synthetic"
+        ) == 10.0
 
 
 # ---------------------------------------------------------------------------

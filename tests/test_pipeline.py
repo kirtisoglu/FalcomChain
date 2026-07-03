@@ -41,7 +41,7 @@ from falcomchain.tree.snapshot import Recorder
 from falcomchain.partition import Partition
 from falcomchain.constraints import Validator
 from falcomchain.markovchain.state import ChainState
-from falcomchain.markovchain.accept import always_accept, metropolis_hastings
+from falcomchain.markovchain.accept import always_accept, boltzmann
 from falcomchain.markovchain.energy import compute_energy, compute_energy_delta
 from falcomchain.markovchain.facility import FacilityAssignment, SuperFacilityAssignment
 from falcomchain.markovchain.chain import MarkovChain

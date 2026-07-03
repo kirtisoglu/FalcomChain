@@ -130,6 +130,7 @@ class Graph(networkx.Graph):
         edges,
         demand,
         candidates=None,
+        super_candidates=None,
         coordinates=None,
         area=None,
         extra_attributes=None,
@@ -141,15 +142,21 @@ class Graph(networkx.Graph):
 
         :param edges: Iterable of (u, v) tuples defining the adjacency.
         :param demand: Dict mapping node -> demand value.
-        :param candidates: Iterable of node IDs that are facility candidates,
-            or dict node -> bool. Defaults to no candidates.
+        :param candidates: Iterable of node IDs that are level-1 facility
+            candidates (F^1 ⊂ V^1), or dict node -> bool. Defaults to no
+            candidates.
+        :param super_candidates: Iterable of node IDs that are level-2
+            (super-) facility candidates (F^2 ⊂ V^1), or dict node -> bool.
+            Independent of ``candidates`` — a node can be in either, both, or
+            neither. Defaults to no super-candidates.
         :param coordinates: Dict mapping node -> (x, y). Defaults to (0, 0).
         :param area: Dict mapping node -> area. Defaults to 1.0.
         :param extra_attributes: Dict of {attribute_name: {node: value}} for
             additional node attributes (e.g., custom features).
 
-        :returns: A Graph with node attributes ``demand``, ``area``, ``candidate``,
-            ``C_X``, ``C_Y``, plus any extras.
+        :returns: A Graph with node attributes ``demand``, ``area``,
+            ``candidate``, ``super_candidate``, ``C_X``, ``C_Y``, plus any
+            extras.
         :rtype: Graph
 
         Example::
@@ -157,7 +164,8 @@ class Graph(networkx.Graph):
             graph = Graph.from_data(
                 edges=[(1, 2), (2, 3), (3, 1)],
                 demand={1: 100, 2: 150, 3: 80},
-                candidates=[1, 3],  # nodes 1 and 3 can host facilities
+                candidates=[1, 3],          # level-1 candidates
+                super_candidates=[3],        # level-2 candidate (must be V^1)
                 coordinates={1: (0, 0), 2: (1, 0), 3: (0.5, 1)},
             )
         """
@@ -169,18 +177,22 @@ class Graph(networkx.Graph):
             if node not in g:
                 g.add_node(node)
 
-        # Normalize candidates to a set
-        if candidates is None:
-            candidate_set = set()
-        elif isinstance(candidates, dict):
-            candidate_set = {n for n, v in candidates.items() if v}
-        else:
-            candidate_set = set(candidates)
+        # Normalize candidate sets
+        def _to_set(value):
+            if value is None:
+                return set()
+            if isinstance(value, dict):
+                return {n for n, v in value.items() if v}
+            return set(value)
+
+        candidate_set = _to_set(candidates)
+        super_candidate_set = _to_set(super_candidates)
 
         for node in g.nodes:
             g.nodes[node]["demand"] = float(demand.get(node, 0))
             g.nodes[node]["area"] = float((area or {}).get(node, 1.0))
             g.nodes[node]["candidate"] = 1 if node in candidate_set else 0
+            g.nodes[node]["super_candidate"] = 1 if node in super_candidate_set else 0
             x, y = (coordinates or {}).get(node, (0.0, 0.0))
             g.nodes[node]["C_X"] = float(x)
             g.nodes[node]["C_Y"] = float(y)
@@ -287,6 +299,7 @@ class Graph(networkx.Graph):
         adjacency: str = "rook",
         demand_col: str = "demand",
         candidate_col: str = "candidate",
+        super_candidate_col: Optional[str] = "super_candidate",
         area_col: Optional[str] = None,
         cols_to_add: Optional[List[str]] = None,
         reproject: bool = False,
@@ -332,6 +345,7 @@ class Graph(networkx.Graph):
             adjacency=adjacency,
             demand_col=demand_col,
             candidate_col=candidate_col,
+            super_candidate_col=super_candidate_col,
             area_col=area_col,
             cols_to_add=cols_to_add,
             reproject=reproject,
@@ -348,6 +362,7 @@ class Graph(networkx.Graph):
         adjacency: str = "rook",
         demand_col: str = "demand",
         candidate_col: str = "candidate",
+        super_candidate_col: Optional[str] = "super_candidate",
         area_col: Optional[str] = None,
         cols_to_add: Optional[List[str]] = None,
         reproject: bool = False,
@@ -377,8 +392,13 @@ class Graph(networkx.Graph):
         :param adjacency: The adjacency type to use ("rook" or "queen"). Default "rook".
         :param demand_col: Name of the column holding demand values. The column
             is renamed to ``demand`` on the resulting graph. Default "demand".
-        :param candidate_col: Name of the column holding facility candidate flags
-            (0/1 or True/False). Renamed to ``candidate``. Default "candidate".
+        :param candidate_col: Name of the column holding level-1 facility
+            candidate flags (0/1 or True/False). Renamed to ``candidate``.
+            Default "candidate".
+        :param super_candidate_col: Name of the column holding level-2
+            (super-) facility candidate flags. Renamed to ``super_candidate``.
+            Optional — if the column is absent from the dataframe, every node
+            gets ``super_candidate=0``. Default "super_candidate".
         :param area_col: Name of the column holding pre-computed areas. If None,
             areas are computed from geometry. Default None.
         :param cols_to_add: Additional columns to copy as node attributes.
@@ -452,6 +472,12 @@ class Graph(networkx.Graph):
             required_cols.append(candidate_col)
             if candidate_col != "candidate":
                 rename_map[candidate_col] = "candidate"
+        # Super-candidate column is optional. If the dataframe doesn't have it,
+        # every node gets super_candidate=0 below.
+        if super_candidate_col is not None and super_candidate_col in df.columns:
+            required_cols.append(super_candidate_col)
+            if super_candidate_col != "super_candidate":
+                rename_map[super_candidate_col] = "super_candidate"
 
         all_cols = list(set(required_cols + (cols_to_add or [])))
         if all_cols:
@@ -462,6 +488,10 @@ class Graph(networkx.Graph):
             for n in graph.nodes:
                 if src in graph.nodes[n]:
                     graph.nodes[n][dst] = graph.nodes[n].pop(src)
+
+        # Default missing super_candidate to 0
+        for n in graph.nodes:
+            graph.nodes[n].setdefault("super_candidate", 0)
 
         if crs_override is not None:
             df.set_crs(crs_override, inplace=True)

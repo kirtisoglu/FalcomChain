@@ -1,3 +1,4 @@
+import math
 from collections import namedtuple
 from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
@@ -10,6 +11,56 @@ from falcomchain.tree.tree import Flip, capacitated_recursive_tree
 from .assignment import Assignment, get_assignment
 from .flows import Flow, neighbor_flips
 from .subgraphs import SubgraphView
+
+
+def _init_unit_phi_psi(phi, gamma, r):
+    """Cut-selection score used during initial-state generation only.
+
+    Biases the recursive bipartition toward subtrees whose single
+    candidate is **geographically central** to its subtree, i.e.:
+
+      * ``phi ≈ 1`` (one candidate per subtree, the natural district
+        shape — vs the original ``psi = phi`` which prefers subtrees
+        that contain MANY candidates, draining the residual of
+        candidate-anchors and causing the recursion to stall late on
+        sparse-candidate graphs like LAS).
+      * Low ``r`` (the candidate has small eccentricity within the
+        subtree — its travel time to the furthest node in the subtree
+        is short, so it can serve the whole district well).
+
+    Combined formula::
+
+        psi = (1 / phi) * exp(-gamma * r)
+
+    At ``gamma == 0`` or when ``travel_times`` is unset, the centrality
+    factor collapses to 1 and only the unit-phi bias remains. With
+    ``travel_times`` and ``gamma > 0`` set during initial-state
+    generation, cuts that produce well-shaped single-candidate
+    districts are preferred.
+
+    Used **only by** :meth:`Partition._from_random_global` and
+    :meth:`Partition._from_random_within_zones`. Chain proposals
+    (``hierarchical_recom``) keep the unbiased default so detailed
+    balance arguments stand.
+
+    :param phi: Number of candidates in the subtree.
+    :param gamma: Candidate-awareness inverse temperature.
+    :param r: Demand radius of the subtree (min eccentricity over
+        candidates ∩ subtree).
+    """
+    if phi < 1:
+        return 0.0
+    score = 1.0 / phi
+    if gamma > 0.0 and r is not None and r != float("inf"):
+        import math
+        score *= math.exp(-gamma * r)
+    return score
+
+
+# Default candidate-awareness for initial-state generation. A mild
+# positive value (gamma_init = 1 / typical_travel_time) brings the
+# centrality bias in without dominating the unit-phi bias.
+_INIT_GAMMA = 0.1
 
 
 class Partition:
@@ -34,6 +85,7 @@ class Partition:
         "subgraphs",
         "supergraph",
         "assignment",
+        "super_assignment",
         "parent",
         "superflip",
         "flip",
@@ -88,6 +140,17 @@ class Partition:
         #use_default_updaters: bool = True,
         capacity_level=1,
         density: Optional[float] = None,
+        super_assignment: Optional[Dict] = None,
+        init_super_partition: bool = False,
+        epsilon_super: Optional[float] = None,
+        c_min: int = 1,
+        c_min_super: int = 1,
+        c_max_super: Optional[int] = None,
+        min_districts_super: int = 1,
+        rule: str = "per_team",
+        enforce_global_balance: bool = False,
+        psi_fn: Optional[Callable] = None,
+        super_psi_fn: Optional[Callable] = None,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -110,13 +173,117 @@ class Partition:
         :param method: The function to use to partition the graph into ``n_parts``. Defaults to
             :func:`~falcomchain.tree.capacitated_recursive_tree`.
         :type method: Callable, optional
+        :param super_assignment: Optional dict mapping each base node to a
+            superdistrict ID (e.g. health-zone). When provided, level-1
+            districts are formed by partitioning each superdistrict
+            independently — every level-1 district lives entirely inside
+            one superdistrict, and the resulting :attr:`super_assignment`
+            on the Partition reflects this fixed grouping. When ``None``
+            (default), the graph is partitioned globally and each level-1
+            district becomes its own superdistrict (identity level-2).
+        :param init_super_partition: When ``True`` (and ``super_assignment``
+            is not provided), additionally call recursive partitioning on
+            the supergraph to produce a non-trivial initial level-2
+            partition (paper Section 5.1, "Initialization"). Default
+            ``False`` keeps the cheap identity grouping. Ignored when
+            ``super_assignment`` is provided (the user-supplied grouping
+            is already a real level-2 partition).
+        :param epsilon_super: Level-2 demand-balance tolerance ε² used by
+            ``init_super_partition``. Defaults to ``epsilon`` when not set.
+        :param c_min: Minimum capacity per district (paper's ``c^ℓ_min``).
+            Default 1. With ``c_min > 1`` no district has fewer than
+            ``c_min`` teams; the chain explores a smaller state space and
+            Assumption 6.1 relaxes by a factor of ``c_min``.
 
         :returns: The partition created with a random assignment
         :rtype: Partition
         """
+        if super_assignment is not None:
+            return cls._from_random_within_zones(
+                graph, epsilon, demand_target, capacity_level, density,
+                super_assignment, c_min=c_min, rule=rule,
+                enforce_global_balance=enforce_global_balance,
+                psi_fn=psi_fn, super_psi_fn=super_psi_fn,
+            )
+        partition = cls._from_random_global(
+            graph, epsilon, demand_target, capacity_level, density,
+            c_min=c_min, rule=rule,
+            enforce_global_balance=enforce_global_balance,
+            psi_fn=psi_fn, super_psi_fn=super_psi_fn,
+        )
+        if init_super_partition:
+            partition._init_super_partition_recursive(
+                demand_target=demand_target,
+                epsilon_super=epsilon_super if epsilon_super is not None else epsilon,
+                density=density,
+                super_psi_fn=super_psi_fn,
+                c_min_super=c_min_super,
+                c_max_super=c_max_super,
+                min_districts_super=min_districts_super,
+            )
+        return partition
+
+    def _init_super_partition_recursive(
+        self,
+        *,
+        demand_target,
+        epsilon_super,
+        density,
+        super_psi_fn: Optional[Callable] = None,
+        c_min_super: int = 1,
+        c_max_super: Optional[int] = None,
+        min_districts_super: int = 1,
+    ) -> None:
+        """
+        Replace the identity ``super_assignment`` with a real level-2
+        partition produced by recursive partitioning of the supergraph
+        (paper Section 5.1, "Initialization").
+
+        On failure (e.g. supergraph too small to partition cleanly), the
+        identity ``super_assignment`` is left in place and a warning is
+        emitted. Callers should not rely on the operation succeeding;
+        the resulting Partition is feasible either way.
+        """
+        import warnings
+
+        total_teams = sum(self.teams.values())
+        try:
+            super_flip = capacitated_recursive_tree(
+                graph=self.supergraph.copy(),
+                n_teams=total_teams,
+                demand_target=demand_target,
+                epsilon=epsilon_super,
+                capacity_level=(c_max_super
+                                if c_max_super is not None
+                                else self.capacity_level),
+                density=density,
+                c_min=c_min_super,
+                supergraph=True,
+                super_psi_fn=super_psi_fn,
+                min_districts_super=min_districts_super,
+            )
+        except RuntimeError as exc:
+            warnings.warn(
+                f"init_super_partition: recursive supergraph partitioning "
+                f"failed ({exc}); keeping identity super_assignment.",
+                stacklevel=3,
+            )
+            return
+
+        # super_flip.flips maps each level-1 district ID -> super ID.
+        if super_flip.flips:
+            self.super_assignment = dict(super_flip.flips)
+
+    @classmethod
+    def _from_random_global(
+        cls, graph, epsilon, demand_target, capacity_level, density,
+        c_min: int = 1, rule: str = "per_team",
+        enforce_global_balance: bool = False,
+        psi_fn: Optional[Callable] = None,
+        super_psi_fn: Optional[Callable] = None,
+    ) -> "Partition":
         total_pop = sum(graph.nodes[n]["demand"] for n in graph)
-        n_teams = int(total_pop // demand_target)
-        # if capacity_level is 1, n_teams becomes number of districts.
+        n_teams = math.ceil(total_pop / demand_target)
 
         flip = capacitated_recursive_tree(
             graph=graph,
@@ -125,16 +292,110 @@ class Partition:
             epsilon=epsilon,
             capacity_level=capacity_level,
             density=density,
+            c_min=c_min,
+            rule=rule,
+            enforce_global_balance=enforce_global_balance,
+            psi_fn=psi_fn,
+            super_psi_fn=super_psi_fn,
         )
 
         return cls(
             capacity_level=capacity_level,
             assignment=flip.flips,
-            #updaters=updaters,
-            #use_default_updaters=use_default_updaters,
             graph=graph,
-            flip= flip
+            flip=flip,
         )
+
+    @classmethod
+    def _from_random_within_zones(
+        cls, graph, epsilon, demand_target, capacity_level, density,
+        super_assignment: Dict, c_min: int = 1, rule: str = "per_team",
+        enforce_global_balance: bool = False,
+        psi_fn: Optional[Callable] = None,
+        super_psi_fn: Optional[Callable] = None,
+    ) -> "Partition":
+        """Partition each superdistrict (zone) independently and stitch."""
+        # Validate: every node in the graph must have a superdistrict.
+        missing = [n for n in graph.nodes if n not in super_assignment]
+        if missing:
+            raise ValueError(
+                f"super_assignment is missing {len(missing)} graph node(s); "
+                f"each base node must be assigned to a superdistrict. "
+                f"First missing: {missing[:5]}"
+            )
+
+        # Group nodes by zone.
+        zones = {}
+        for node, zone_id in super_assignment.items():
+            if node in graph.nodes:
+                zones.setdefault(zone_id, set()).add(node)
+
+        all_flips = {}
+        all_team_flips = {}
+        zone_to_l1_ids = {}
+        next_id_offset = 0
+        log_proposal_ratio = 0.0
+
+        for zone_id, zone_nodes in zones.items():
+            zone_subgraph = graph.subgraph(zone_nodes)
+            zone_pop = sum(graph.nodes[n]["demand"] for n in zone_nodes)
+            zone_teams = math.ceil(zone_pop / demand_target)
+            if zone_teams < 1:
+                raise ValueError(
+                    f"Superdistrict {zone_id!r} has total demand {zone_pop} < "
+                    f"demand_target {demand_target}; cannot allocate any team."
+                )
+
+            zone_flip = capacitated_recursive_tree(
+                graph=zone_subgraph,
+                n_teams=zone_teams,
+                demand_target=demand_target,
+                epsilon=epsilon,
+                capacity_level=capacity_level,
+                density=density,
+                c_min=c_min,
+                rule=rule,
+                enforce_global_balance=enforce_global_balance,
+                psi_fn=psi_fn,
+                super_psi_fn=super_psi_fn,
+            )
+            log_proposal_ratio += zone_flip.log_proposal_ratio
+
+            # Re-number this zone's level-1 IDs to avoid collisions across zones.
+            id_remap = {
+                old_id: i + next_id_offset
+                for i, old_id in enumerate(sorted(zone_flip.new_ids))
+            }
+            next_id_offset += len(zone_flip.new_ids)
+
+            for node, old_id in zone_flip.flips.items():
+                all_flips[node] = id_remap[old_id]
+            for old_id, n_teams in zone_flip.team_flips.items():
+                all_team_flips[id_remap[old_id]] = n_teams
+            zone_to_l1_ids[zone_id] = {id_remap[old_id] for old_id in zone_flip.new_ids}
+
+        # Build the global Flip with renumbered IDs.
+        merged_flip = Flip(
+            flips=all_flips,
+            team_flips=all_team_flips,
+            new_ids=frozenset(all_team_flips.keys()),
+            merged_ids=frozenset(),
+            log_proposal_ratio=log_proposal_ratio,
+        )
+
+        partition = cls(
+            capacity_level=capacity_level,
+            assignment=all_flips,
+            graph=graph,
+            flip=merged_flip,
+        )
+        # Override the identity super_assignment with the zone grouping.
+        zone_for_l1 = {}
+        for zone_id, l1_ids in zone_to_l1_ids.items():
+            for l1_id in l1_ids:
+                zone_for_l1[l1_id] = zone_id
+        partition.super_assignment = zone_for_l1
+        return partition
 
     def _first_time(
         self,
@@ -147,11 +408,11 @@ class Partition:
     ):
         if isinstance(graph, Graph):
             self.graph = FrozenGraph(graph)
-        elif isinstance(graph, networkx.Graph):
-            graph = Graph.from_networkx(graph)
-            self.graph = FrozenGraph(graph)
         elif isinstance(graph, FrozenGraph):
             self.graph = graph
+        elif isinstance(graph, nx.Graph):
+            graph = Graph.from_networkx(graph)
+            self.graph = FrozenGraph(graph)
         else:
             raise TypeError(f"Unsupported Graph object with type {type(graph)}")
 
@@ -164,6 +425,10 @@ class Partition:
         self.superflip = None
         self.flow = Flow.initial(flip)
         self.assignment = get_assignment(assignment, graph, flip.team_flips)
+        # Initial level-2 partition: each level-1 district is its own
+        # superdistrict (identity). Real groupings appear after the first
+        # hierarchical_recom step.
+        self.super_assignment = {pid: pid for pid in self.parts}
 
         #if updaters is None:
         #    updaters = {}
@@ -173,7 +438,7 @@ class Partition:
         #else:
         #    self.updaters = {}
         #self.updaters.update(updaters)
-        
+
         #self.cut_edges = cut_edges(self)
         self.supergraph = supergraph(self)
 
@@ -195,7 +460,8 @@ class Partition:
         self.flow = Flow.from_parent(parent, self, superflip, flip)
         self.assignment = parent.assignment.copy()
         self.assignment.update_flows(self.flow, self.flip.team_flips)
-        
+        self.super_assignment = self._build_super_assignment(parent, superflip, flip)
+
         #self.cut_edges = cut_edges(self) # done
         self.supergraph = supergraph(self) # done
         
@@ -236,8 +502,8 @@ class Partition:
 
     def part_demand(self, part):
         return sum(self.graph.nodes[node]["demand"] for node in self.parts[part])
-    
-    
+
+
     def part_area(self, part):
         return sum(self.graph.nodes[node]["area"] for node in self.parts[part])
 
@@ -253,6 +519,77 @@ class Partition:
     @property
     def candidates(self):
         return self.assignment.candidates
+
+    @property
+    def super_parts(self):
+        """Maps superdistrict ID to the frozenset of level-1 district IDs in it."""
+        groups = {}
+        for l1_id, super_id in self.super_assignment.items():
+            groups.setdefault(super_id, set()).add(l1_id)
+        return {sid: frozenset(ls) for sid, ls in groups.items()}
+
+    @property
+    def super_teams(self):
+        """Maps superdistrict ID to the total number of teams in it."""
+        totals = {}
+        for l1_id, super_id in self.super_assignment.items():
+            totals[super_id] = totals.get(super_id, 0) + self.teams.get(l1_id, 0)
+        return totals
+
+    def _build_super_assignment(self, parent, superflip, flip):
+        """
+        Derive the new level-2 assignment after a hierarchical_recom step.
+
+        The full resampled level-2 partition lives on ``superflip.flips``
+        (level-1 ID -> superdistrict ID, computed over the parent's
+        level-1 IDs). Three groups of level-1 IDs need handling:
+
+        * **Unchanged** (parent IDs not in ``superflip.merged_ids``) keep
+          the resampled super_id from ``superflip.flips``.
+        * **Merged** (in ``superflip.merged_ids``) disappear in the new
+          partition and are dropped.
+        * **Newly created** (``flip.new_ids`` from the lower-level
+          re-partition) all join the chosen superdistrict.
+
+        For backwards compatibility with callers that still pass a
+        ``Flip(merged_ids=merge)`` without populating ``flips``, this
+        falls back to copying the parent's super_assignment, dropping
+        merged IDs, and placing new IDs into the chosen superdistrict
+        derived from any merged ID.
+        """
+        if superflip is None:
+            return {pid: pid for pid in self.parts}
+
+        merged = superflip.merged_ids or frozenset()
+
+        if superflip.flips:
+            chosen_super_id = (
+                superflip.flips.get(next(iter(merged))) if merged else None
+            )
+            new_sa = {
+                l1_id: super_id
+                for l1_id, super_id in superflip.flips.items()
+                if l1_id not in merged
+            }
+        else:
+            # Legacy path: superflip carries only merged_ids. Inherit the
+            # parent's level-2 partition and patch the chosen group.
+            chosen_super_id = next(
+                (parent.super_assignment[m] for m in merged
+                 if m in parent.super_assignment),
+                None,
+            )
+            new_sa = {
+                l1_id: super_id
+                for l1_id, super_id in parent.super_assignment.items()
+                if l1_id not in merged
+            }
+
+        if chosen_super_id is not None:
+            for new_l1_id in flip.new_ids:
+                new_sa[new_l1_id] = chosen_super_id
+
+        return new_sa
 
 
     def save(self, path: str):

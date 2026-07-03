@@ -107,11 +107,13 @@ uniform over admissible cuts.
 The default acceptance is `always_accept`. The chain is a sampler, not an
 optimizer — it explores the feasible space rather than minimizing energy.
 
-For optimization variants (find a low-energy plan), use
-`metropolis_hastings` with a custom energy function. Note: the standard
-ReCom MH formulation does not satisfy detailed balance without a Cannon et al.
-2022 reversibility correction; the current `metropolis_hastings` is a
-soft-Boltzmann approximation suitable for optimization but not strict sampling.
+For optimization variants (find a low-energy plan), use the
+`boltzmann` acceptance rule with a custom energy function. ``boltzmann``
+is a heuristic optimizer, not a true Metropolis-Hastings sampler — it
+omits the proposal-density ratio because that ratio is intractable for
+FalCom (the standard ReCom MH formulation requires the
+[Cannon et al. 2022 reversibility correction](https://arxiv.org/abs/2008.08054),
+which we have not implemented).
 
 ## Initial state
 

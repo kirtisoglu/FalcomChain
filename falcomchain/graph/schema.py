@@ -45,8 +45,22 @@ NODE_ATTRIBUTES: Dict[str, AttributeSpec] = {
         type=int,
         default=0,
         purpose=(
-            "Whether this node is a facility candidate (0 or 1). "
+            "Whether this node is a level-1 facility candidate (0 or 1). "
             "Each district must contain at least one candidate."
+        ),
+        validator=lambda v: v in (0, 1, True, False),
+    ),
+    "super_candidate": AttributeSpec(
+        name="super_candidate",
+        required=False,
+        type=int,
+        default=0,
+        purpose=(
+            "Whether this node is a level-2 (super-) facility candidate "
+            "(0 or 1). The level-2 facility set F^2 is a subset of V^1 and "
+            "is independent of the level-1 candidate set. If a superdistrict "
+            "contains no super-candidates, no level-2 facility is assigned "
+            "for it (soft constraint)."
         ),
         validator=lambda v: v in (0, 1, True, False),
     ),

@@ -58,6 +58,7 @@ class MarkovChain:
         initial_state: ChainState,
         total_steps: int,
         recorder=None,
+        callbacks=None,
     ) -> None:
         """
         :param proposal: Function proposing the next ChainState from the current one.
@@ -67,7 +68,10 @@ class MarkovChain:
             this is a :class:`~falcomchain.constraints.Validator` class instance.
         :type constraints: Union[Iterable[Callable], Validator, Iterable[Bounds], Callable]
         :param accept: Acceptance function with signature ``(proposed: ChainState, current: ChainState) -> bool``.
-            Use ``always_accept`` for unconditional sampling or ``metropolis_hastings`` for MH.
+            Use ``always_accept`` for unconditional sampling (paper default) or
+            ``boltzmann`` for energy-biased optimization. ``boltzmann`` is a
+            heuristic optimizer, not a true Metropolis-Hastings sampler — see
+            its docstring for the caveats.
         :type accept: Callable
         :param initial_state: Initial :class:`~falcomchain.markovchain.ChainState`.
         :type initial_state: ChainState
@@ -75,6 +79,10 @@ class MarkovChain:
         :type total_steps: int
         :param recorder: Optional :class:`~falcomchain.tree.snapshot.Recorder` for animation output.
         :type recorder: Optional[Recorder]
+        :param callbacks: Optional list of callables invoked after each step with
+            signature ``(state: ChainState, accepted: bool) -> None``.
+            Use this to attach ensemble analysis or custom logging.
+        :type callbacks: Optional[list[Callable]]
 
         :returns: None
 
@@ -104,6 +112,7 @@ class MarkovChain:
         self.initial_state = initial_state
         self.state = initial_state
         self.recorder = recorder
+        self.callbacks = callbacks or []
 
         # Attach recorder to state so proposal functions can access it
         if recorder is not None:
@@ -188,18 +197,28 @@ class MarkovChain:
             return self.state
 
         while self.counter < self.total_steps:
-            proposed_next_state = self.proposal(self.state)
             parent_energy = self.state.energy
+            accepted = False
 
             # Drop the grandparent reference to avoid unbounded memory growth
             if self.state.partition is not None:
                 self.state.partition.parent = None
 
-            accepted = False
-            if self.is_valid(proposed_next_state.partition):
-                if self.accept(proposed_next_state, self.state):
-                    self.state = proposed_next_state
-                    accepted = True
+            # Proposal can raise RuntimeError when the spanning-tree heuristic
+            # exhausts its retry budget on a particular RNG state. Treat that
+            # as a rejection rather than killing the chain — the chain stays
+            # at the current state for this step. The proposed_next_state may
+            # also fail validity / acceptance checks; same outcome.
+            try:
+                proposed_next_state = self.proposal(self.state)
+            except RuntimeError:
+                proposed_next_state = None
+
+            if proposed_next_state is not None:
+                if self.is_valid(proposed_next_state.partition):
+                    if self.accept(proposed_next_state, self.state):
+                        self.state = proposed_next_state
+                        accepted = True
 
             if self.recorder is not None:
                 self.recorder.record_step(
@@ -207,6 +226,9 @@ class MarkovChain:
                     accepted=accepted,
                     parent_energy=parent_energy,
                 )
+
+            for cb in self.callbacks:
+                cb(self.state, accepted)
 
             self.counter += 1
             return self.state
