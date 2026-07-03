@@ -1,3 +1,15 @@
+---
+jupytext:
+  text_representation:
+    extension: .md
+    format_name: myst
+    format_version: 0.13
+kernelspec:
+  display_name: Python 3
+  language: python
+  name: python3
+---
+
 # Case Study: Working with Real Data
 
 ```{admonition} Goal of this page
@@ -26,29 +38,60 @@ repo; this page distills the recipe.
 ## 0. The instance
 
 Before any chain mechanics, it helps to see what the dataset actually
-looks like. This is the LAS case-study instance as it appears in the
-FalCom paper — the geographic units on the left, and the graph the
-chain actually operates on on the right:
+looks like. This is the LAS case-study instance from the FalCom paper,
+drawn at build time with FalcomPlot's geographic helpers. The docs ship
+the catchment polygons (simplified for size), the dissolved catchment
+boundary, and the dual-graph edge list — the latter two computed from
+the full-resolution geometry.
 
-```{image} _static/las_lsoas.png
-:alt: LSOA polygons of the LAS catchment
-:width: 49%
+First the geographic units. `plot_units` draws the LSOA polygons and
+the city boundary:
+
+```{code-cell} python
+import geopandas as gpd
+import falcomplot as fp
+
+lsoa = gpd.read_file("_static/las_lsoas.geojson")
+boundary = gpd.read_file("_static/las_boundary.geojson")
+
+fp.plot_units(
+    lsoa, boundary=boundary,
+    title=f"The {len(lsoa):,} LSOAs of the LAS catchment",
+);
 ```
-```{image} _static/las_dual_graph.png
-:alt: Rook-adjacency dual graph of the LAS catchment
-:width: 49%
+
+These are the 4,994 LSOAs LAS serves — Greater London's 5,042 minus
+the 48 Brentwood LSOAs covered by EEAST. The gap on the Thames is the
+river itself; ambulances cross it only at bridges, which the travel
+times (step 2) capture.
+
+The chain does not operate on polygons but on their **rook-adjacency
+dual graph** — one node per LSOA, one edge per pair of LSOAs sharing a
+boundary segment. `plot_dual_graph` draws it:
+
+```{code-cell} python
+import json
+
+with open("_static/las_dual_graph_edges.json") as f:
+    edges = json.load(f)["edges"]
+
+fp.plot_dual_graph(
+    lsoa, edges, id_col="LSOA21CD", boundary=boundary,
+    title=f"Rook-adjacency dual graph ({len(edges):,} edges)",
+);
 ```
 
-*Left:* the 4,994 LSOA polygons of the LAS catchment (the 48 Brentwood
-LSOAs served by EEAST are excluded). *Right:* the rook-adjacency dual
-graph `G¹` on which the chain operates, with 14,550 edges; each node
-is an LSOA carrying its integer annual demand.
+Every district the chain proposes is a connected subgraph of this
+graph; each node carries its LSOA's integer annual demand. Building
+this graph from the polygons is exactly what `Graph.from_geodataframe`
+does in step 1 below (`plot_dual_graph` can also compute the adjacency
+itself when you pass no edge list — here we pass the paper's 14,550
+edges, computed from the full-resolution geometry, because the
+simplified docs polygons would miss a handful of contacts).
 
-The polygons-to-dual-graph step is exactly what
-`Graph.from_geodataframe` does in step 1 below. For an *interactive*
-overview map (borough boundaries, station markers with tooltips), see
-the Leaflet section of [Visualization with FalcomPlot](visualization.md);
-the LAS repo ships
+For an *interactive* overview map (borough boundaries, station markers
+with tooltips), see the Leaflet section of
+[Visualization with FalcomPlot](visualization.md); the LAS repo ships
 [`analysis/run_overview_map.py`](https://github.com/kirtisoglu/London-Ambulance-Service-System/blob/main/analysis/run_overview_map.py),
 which produces it.
 
