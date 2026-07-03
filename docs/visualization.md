@@ -271,6 +271,13 @@ were, why a proposal was rejected — FalcomPlot ships a Canvas-based
 viewer that replays a recorded chain with district and spanning-tree
 modes.
 
+```{tip}
+**Try it in the browser first** — a hosted instance with pre-recorded
+demo and London Ambulance Service trajectories runs at
+[akirtisoglu.me/research/falcom/dashboard](https://akirtisoglu.me/research/falcom/dashboard).
+No install needed; the steps below are for replaying *your own* runs.
+```
+
 Record the chain with FalcomChain's `Recorder`, export, and serve:
 
 ```python
