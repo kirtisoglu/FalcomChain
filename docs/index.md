@@ -82,6 +82,14 @@ tutorials/*
 
 ```{toctree}
 :maxdepth: 1
+:caption: Project
+
+reproducibility
+contributing
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Reference
 
 schema

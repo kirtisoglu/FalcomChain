@@ -14,78 +14,43 @@ together the pieces you need, with links to the focused references
 for each.
 
 The running example throughout is the **London Ambulance Service
-(LAS)** application: 5,042 LSOAs (Lower Layer Super Output Areas)
-covering Greater London, ~1.06 M annual incidents as demand,
-63 real ambulance stations as level-1 candidates, and 7 HQ/EOC sites
-as level-2 candidates. The full LAS notebook lives in the
+(LAS)** application from the FalCom paper: 4,994 LSOAs (Lower Layer
+Super Output Areas) of the LAS catchment (Greater London's 5,042 minus
+the 48 Brentwood LSOAs LAS does not serve), annual attended-incident
+counts as demand, the 66 active ambulance stations as level-1
+candidates, and the 21 Group HQs — each itself an active station — as
+level-2 candidates. The full LAS pipeline lives in the
 [London-Ambulance-Service-System](https://github.com/kirtisoglu/London-Ambulance-Service-System)
 repo; this page distills the recipe.
 
-## 0. Visual overview
+## 0. The instance
 
 Before any chain mechanics, it helps to see what the dataset actually
-looks like. The figure below is built with FalcomPlot's mapping
-helpers — `build_basemap`, `add_hierarchy`, and `add_markers` — and
-shows the three layers users will reach for repeatedly: the LSOA
-polygons (`G¹` base), dissolved borough boundaries (administrative
-reporting layer, *not* a chain level), and the L1/L2 facility
-candidates.
+looks like. This is the LAS case-study instance as it appears in the
+FalCom paper — the geographic units on the left, and the graph the
+chain actually operates on on the right:
 
-![Greater London — LSOAs, boroughs, and LAS facilities](_static/london_overview.png)
-
-Recipe (paths assume you cloned the LAS repo as a sibling directory):
-
-```python
-import geopandas as gpd
-import pandas as pd
-from falcomplot.mapping import plott
-
-lsoa = gpd.read_file("data/raw/LSOA_2021_London.gpkg").to_crs(4326)
-lsoa["borough"] = lsoa["LSOA21NM"].str.replace(r" \d{3}[A-Z]$", "", regex=True)
-
-stations = pd.read_csv("data/raw/LAS_stations.csv")
-stations_gdf = gpd.GeoDataFrame(
-    stations.assign(category="LAS station", source="LAS",
-                    name=stations["station_name"]),
-    geometry=gpd.points_from_xy(stations["longitude"], stations["latitude"]),
-    crs=4326,
-)
-
-l2 = pd.read_csv("data/raw/LAS_L2_facilities.csv")
-l2["category"] = l2["facility_type"].map({
-    "EOC": "Emergency Operations Centre",
-    "Sector HQ": "Sector HQ (proxy)",
-}).fillna("Sector HQ (proxy)")
-l2["source"] = "LAS"
-l2["name"] = l2["facility_name"]
-l2_gdf = gpd.GeoDataFrame(
-    l2,
-    geometry=gpd.points_from_xy(l2["longitude"], l2["latitude"]),
-    crs=4326,
-)
-
-c = lsoa.geometry.union_all().centroid
-m = plott.build_basemap(boundary=lsoa, center=(c.y, c.x), zoom=10)
-plott.add_hierarchy(
-    m, hierarchy="borough", basemap_gdf=lsoa,
-    color="#222", weight=1.6, fill_color="#fed8b1", fill_opacity=0.18,
-    tooltip_fields=["borough"],
-)
-categories = {
-    "LAS station": {"color": "#e63946", "radius": 5, "order": 0},
-    "Emergency Operations Centre": {"color": "#1d3557", "radius": 8, "order": 1},
-    "Sector HQ (proxy)": {"color": "#457b9d", "radius": 7, "order": 2},
-}
-plott.add_markers(m, stations_gdf, categories=categories)
-plott.add_markers(m, l2_gdf, categories=categories)
-m.save("london_overview.html")
+```{image} _static/las_lsoas.png
+:alt: LSOA polygons of the LAS catchment
+:width: 49%
+```
+```{image} _static/las_dual_graph.png
+:alt: Rook-adjacency dual graph of the LAS catchment
+:width: 49%
 ```
 
-The interactive Leaflet output lets you hover for borough labels and
-click markers for facility metadata. For the static figure above the
-LAS repo ships
+*Left:* the 4,994 LSOA polygons of the LAS catchment (the 48 Brentwood
+LSOAs served by EEAST are excluded). *Right:* the rook-adjacency dual
+graph `G¹` on which the chain operates, with 14,550 edges; each node
+is an LSOA carrying its integer annual demand.
+
+The polygons-to-dual-graph step is exactly what
+`Graph.from_geodataframe` does in step 1 below. For an *interactive*
+overview map (borough boundaries, station markers with tooltips), see
+the Leaflet section of [Visualization with FalcomPlot](visualization.md);
+the LAS repo ships
 [`analysis/run_overview_map.py`](https://github.com/kirtisoglu/London-Ambulance-Service-System/blob/main/analysis/run_overview_map.py),
-which produces both the HTML and the PNG.
+which produces it.
 
 ## The end-to-end pipeline
 

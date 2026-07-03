@@ -76,6 +76,8 @@ not on separate sites:
 | [Ensemble analysis](docs/ensemble.md)                 | Boundary, facility, and capacity statistics across MCMC samples  |
 | [Visualization](docs/visualization.md)                | Every FalcomPlot helper in one tour                              |
 | [Case study](docs/working_with_real_data.md)          | The London Ambulance Service pipeline on real data               |
+| [Reproducibility](docs/reproducibility.md)            | Seeding, run manifests, and exact chain replay                   |
+| [Contributing](CONTRIBUTING.md)                       | Bug reports, dev setup, and what we welcome                      |
 | [Graph schema](docs/schema.md)                        | Required and optional graph attributes                           |
 | [Tutorials](docs/tutorials/)                          | Jupyter notebook walkthroughs                                    |
 

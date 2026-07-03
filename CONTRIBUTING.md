@@ -69,7 +69,9 @@ code. Before changing internals, check if you can use:
 - A custom `accept` function
 - The `extra_attributes` mechanism for graph data
 
-See [docs/structure.md](docs/structure.md) for the full list of extension points.
+See the pluggable extension points table in
+[Running a FalCom Chain](https://falcomchain.readthedocs.io/en/latest/running_a_chain.html)
+for the full list.
 
 ## Releasing (maintainers only)
 
@@ -86,4 +88,4 @@ Be kind and constructive. Open research thrives on respectful disagreement.
 ## License
 
 By contributing, you agree your contributions are licensed under the MIT License
-(see [LICENSE.txt](LICENSE.txt)).
+(see [LICENSE.txt](https://github.com/kirtisoglu/FalcomChain/blob/main/LICENSE.txt)).
