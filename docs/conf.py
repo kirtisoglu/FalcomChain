@@ -31,10 +31,11 @@ extensions = [
 
 source_suffix = [".rst", ".md", ".ipynb"]
 master_doc = "index"
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints"]
 
 # myst-nb settings
 nb_execution_mode = "cache"  # only re-execute when notebook changes
-nb_execution_timeout = 120
+nb_execution_timeout = 300
 nb_execution_allow_errors = False
 
 autosummary_generate = True

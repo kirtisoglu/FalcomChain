@@ -12,6 +12,13 @@ kernelspec:
 
 # Ensemble Analysis
 
+```{admonition} Goal of this page
+:class: tip
+Turn a chain's samples into decisions: accumulate boundary, facility,
+and capacity statistics with `EnsembleStats`, check convergence, and
+read the resulting maps.
+```
+
 FalCom is the first MCMC sampler for facility location. The ensemble
 module turns that sampler into a decision-support tool by analyzing the
 *distribution* of near-optimal designs, not just a single optimum.
@@ -38,9 +45,9 @@ Heterogeneity is what makes ensemble analysis informative — without
 it, every partition is exchangeable under the grid's symmetries and
 no boundary is meaningfully more robust than another.
 
-We then run a real `hierarchical_recom` chain for 200 steps,
-discarding the first 20 (burn-in) and recording every other step
-(thinning) — 90 samples in total.
+We then run a real `hierarchical_recom` chain for 400 steps,
+discarding the first 40 (burn-in) and recording every other step
+(thinning) — 180 samples in total.
 
 ```{code-cell} python
 import json
@@ -98,7 +105,7 @@ partition = Partition.from_random_assignment(
 )
 state = ChainState.initial(partition=partition, energy=0.0, beta=1.0)
 
-ensemble = EnsembleStats(burn_in=20, thin=2)
+ensemble = EnsembleStats(burn_in=40, thin=2)
 chain = MarkovChain(
     proposal=partial(
         hierarchical_recom,
@@ -109,7 +116,7 @@ chain = MarkovChain(
     constraints=lambda p: True,
     accept=always_accept,
     initial_state=state,
-    total_steps=200,
+    total_steps=400,
     callbacks=[ensemble.observe],
 )
 list(chain)
@@ -163,12 +170,31 @@ print(f"Essential (>=90%):        {len(ensemble.facility.essential(0.9))}")
 print(f"Substitutable (<50%):     {len(ensemble.facility.substitutable(0.5))}")
 ```
 
-The candidate selection rates, sorted:
+Selection rates read best as a chart — essential candidates (selected
+in nearly every sample) stand apart from the substitutable tail:
 
 ```{code-cell} python
-for node, freq in sorted(facility_freq.items(), key=lambda kv: -kv[1]):
-    print(f"  {node}: {freq:.2f}")
+import matplotlib.pyplot as plt
+
+ranked = sorted(facility_freq.items(), key=lambda kv: -kv[1])
+nodes = [str(n) for n, _ in ranked]
+rates = [f for _, f in ranked]
+
+fig, ax = plt.subplots(figsize=(7, 3))
+colors = ["#b3452c" if r >= 0.9 else "#33608c" if r >= 0.5 else "#a9bfd6"
+          for r in rates]
+ax.bar(range(len(nodes)), rates, color=colors)
+ax.axhline(0.9, color="#b3452c", lw=0.8, ls="--")
+ax.axhline(0.5, color="#a9bfd6", lw=0.8, ls="--")
+ax.set_xticks(range(len(nodes)), nodes, rotation=90, fontsize=7)
+ax.set_ylabel("selection frequency")
+ax.set_title("Facility stability: essential (red) vs substitutable (pale)");
 ```
+
+Candidates above the 0.9 line are *essential* — the chain picks them in
+nearly every sampled plan, so removing them would degrade most good
+designs. Candidates below 0.5 are *substitutable*: other sites cover
+their role.
 
 ## Capacity utilization summary
 
@@ -199,11 +225,11 @@ print(f"fragile_boundaries:       {len(report['fragile_boundaries'])}")
 ## Burn-in, thinning, and the callback hook
 
 The chain example above already uses the standard MCMC accumulation
-pattern: ``EnsembleStats(burn_in=20, thin=2)`` was passed as a
+pattern: ``EnsembleStats(burn_in=40, thin=2)`` was passed as a
 ``callback`` to ``MarkovChain``, so the chain feeds every state into
-``ensemble.observe`` as it runs. Out of 200 chain steps, the first
-20 are discarded (burn-in) and only every other remaining step is
-recorded (thinning), giving ``n_samples = 90``.
+``ensemble.observe`` as it runs. Out of 400 chain steps, the first
+40 are discarded (burn-in) and only every other remaining step is
+recorded (thinning), giving ``n_samples = 180``.
 
 For longer chains, raise the burn-in and thinning to match — typical
 real-world settings are ``burn_in=500-2000`` and ``thin=10`` for
@@ -213,8 +239,6 @@ chains of 10,000+ steps:
 ensemble = EnsembleStats(burn_in=500, thin=10)
 chain = MarkovChain(..., total_steps=10_000, callbacks=[ensemble.observe])
 list(chain)
-report = ensemble.report()
-
 report = ensemble.report()
 ```
 

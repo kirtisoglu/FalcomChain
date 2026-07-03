@@ -1,4 +1,11 @@
-# Working with Real Data
+# Case Study: Working with Real Data
+
+```{admonition} Goal of this page
+:class: tip
+The end-to-end recipe for a real instance — the London Ambulance
+Service — from raw geodata and travel times through feasibility repair
+to a recorded chain, with links to the focused reference for each step.
+```
 
 The synthetic demo grid is fine for tutorials, but real workflows
 start from shapefiles, GeoPackages, or GeoJSON of geographic units
@@ -12,7 +19,7 @@ covering Greater London, ~1.06 M annual incidents as demand,
 63 real ambulance stations as level-1 candidates, and 7 HQ/EOC sites
 as level-2 candidates. The full LAS notebook lives in the
 [London-Ambulance-Service-System](https://github.com/kirtisoglu/London-Ambulance-Service-System)
-repo; this page distils the recipe.
+repo; this page distills the recipe.
 
 ## 0. Visual overview
 
@@ -134,35 +141,35 @@ is in [Graph Attribute Schema](schema.md).
 ## 2. Compute travel times with FalcomTravel
 
 Travel times feed `Assignment.travel_times` and drive the level-1
-covering radius (Eq. 17) and the optional energy objective (demand-weighted
-travel time). For real road networks,
-[FalcomTravel](https://github.com/kirtisoglu/Travel-Time-Matrix) — an
-R package — produces the matrix from OSM data using the
-`travel-time-matrix` algorithm.
-
-The interchange format is a CSV/Parquet with three columns:
-
-| `origin_id` | `destination_id` | `seconds` |
-|-------------|------------------|-----------|
-| node identifier matching `graph.nodes` | node identifier matching `graph.nodes` | non-negative travel time |
-
-Loading the matrix back into Python:
+covering radius (Eq. 17) and the optional energy objective
+(demand-weighted travel time). For real road networks,
+[FalcomTravel](https://github.com/kirtisoglu/FalcomTravel) produces the
+matrix from OSM data (multimodal via r5r, or pure-Python via OSMnx):
 
 ```python
-import pandas as pd
+import falcomtravel as ft
 from falcomchain.partition.assignment import Assignment
 
-tt = pd.read_parquet("travel_times.parquet")
-Assignment.travel_times = {
-    (row.origin_id, row.destination_id): float(row.seconds)
-    for row in tt.itertuples()
-}
+coords = ft.coords_from_graph(graph, x="C_X", y="C_Y")   # (lon, lat)
+backend = ft.R5RBackend(
+    data_path="data/london",          # OSM .pbf + GTFS .zip
+    coords=coords,
+    timezone="Europe/London",
+)
+matrix = backend.compute(
+    origins=station_nodes,
+    destinations=list(coords),
+    mode=ft.Mode.DRIVE,
+)
+matrix.to_parquet("travel_times.parquet")     # compute once, reuse
+
+Assignment.travel_times = matrix.as_dict()
 ```
 
-For prototyping without FalcomTravel, fall back to graph distance
-(BFS hop count) or Euclidean distance from `C_X`/`C_Y`. The library
-treats `Assignment.travel_times` as a pluggable distance metric — any
-dict-like `(u, v) -> float` works.
+The full backend guide — including `diagnose()` for catching
+disconnected road fragments before an hour-long routing run, and the
+dependency-free fallbacks for prototyping — is on the
+[Travel Times with FalcomTravel](travel_times.md) page.
 
 ## 3. Verify Assumption 6.1
 
@@ -222,9 +229,6 @@ first `hierarchical_recom` step resamples it anyway. Pass
 partition by recursively partitioning the supergraph (paper Section 5.1
 "Initialization"). Useful when you want an honest initial state for
 ensemble analysis from step 0.
-
-For health-zone-style fixed superdistricts, pass `super_assignment`
-instead — see [Fixed Superdistricts](fixed_superdistricts.md).
 
 ## 5. Run the chain
 
@@ -297,7 +301,7 @@ optional per-step substep JSON for the four-phase animation.
 - **Heavy-demand outlier nodes** — if a single node's demand exceeds
   `c_max · demand_target · (1 + ε)`, the algorithm cannot place it
   inside any admissible district. Either subdivide the unit, raise
-  `epsilon`, or merge it with neighbours before building the graph.
+  `epsilon`, or merge it with neighbors before building the graph.
 - **Travel-time matrix mismatches** — `Assignment.travel_times` keys
   must match `graph.nodes` exactly. If FalcomTravel uses GEOIDs and
   your graph is built with sequential integers, build a key map
@@ -309,4 +313,7 @@ optional per-step substep JSON for the four-phase animation.
 - [Optimization Methods](optimization_methods.md) — sampling vs
   Boltzmann optimization vs custom acceptance.
 - [Ensemble Analysis](ensemble.md) — boundary, facility, and capacity
-  statistics across samples.
+  statistics across samples, including the London Ambulance
+  convergence diagnostics.
+- [Visualization with FalcomPlot](visualization.md) — every plotting
+  helper used above.

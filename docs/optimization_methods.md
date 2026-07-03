@@ -12,6 +12,13 @@ kernelspec:
 
 # Optimization Methods
 
+```{admonition} Goal of this page
+:class: tip
+Turn the sampler into an optimizer when you need one low-energy plan:
+energy functions, Boltzmann acceptance, annealing schedules, and custom
+acceptance rules — with the caveats spelled out.
+```
+
 **FalCom is a sampler by default.** Section 3 of the paper deliberately
 omits an objective — the chain explores the feasible region weighted
 by the candidate-awareness score ψ, and analysis happens via
@@ -174,7 +181,7 @@ chain = MarkovChain(
     constraints=lambda p: True,
     accept=always_accept,
     initial_state=fresh_state(beta=0.0),  # no energy_fn — no objective
-    total_steps=15,
+    total_steps=200,
 )
 n_samples = sum(1 for _ in chain)
 print(f"sampling produced {n_samples} states (no energy computed)")
@@ -205,7 +212,7 @@ chain = MarkovChain(
     constraints=lambda p: True,
     accept=boltzmann,
     initial_state=fresh_state(beta=0.1, energy_fn=compute_energy),
-    total_steps=15,
+    total_steps=200,
 )
 soft_energies = [s.energy for s in chain]
 print(f"Boltzmann (β=0.1): min={min(soft_energies):.0f}, "
@@ -223,25 +230,27 @@ chain = MarkovChain(
     constraints=lambda p: True,
     accept=boltzmann,
     initial_state=fresh_state(beta=5.0, energy_fn=compute_energy),
-    total_steps=15,
+    total_steps=200,
 )
 opt_energies = [s.energy for s in chain]
 print(f"Boltzmann (β=5.0): min={min(opt_energies):.0f}, "
       f"final={opt_energies[-1]:.0f}")
 ```
 
-Compare the two β values:
+Compare the two β values. The low-temperature chain (β=5.0) locks into
+low-energy plans quickly but explores little; the high-temperature chain
+(β=0.1) keeps moving and only drifts downward:
 
 ```{code-cell} python
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots(figsize=(6, 3))
-ax.plot(soft_energies, label="Boltzmann (β=0.1)")
-ax.plot(opt_energies,  label="Boltzmann (β=5.0)")
+fig, ax = plt.subplots(figsize=(7, 3.2))
+ax.plot(soft_energies, label="β=0.1 (explore)", color="#5b8cc8", lw=1.2)
+ax.plot(opt_energies,  label="β=5.0 (exploit)", color="#c85b5b", lw=1.2)
 ax.set_xlabel("step")
 ax.set_ylabel("energy")
 ax.legend(fontsize=8)
-ax.set_title("Energy trace at two temperatures");
+ax.set_title("Energy trace at two fixed temperatures");
 ```
 
 (Pure sampling is omitted from the plot — it computes no energy by design.)
@@ -250,27 +259,58 @@ ax.set_title("Energy trace at two temperatures");
 
 A constant β is rarely optimal for hard problems. Annealing — start at
 small β (broad exploration) and ramp up (greedy refinement) — usually
-beats fixed β. The simplest pattern: update `state.beta` between
+beats a fixed β. The simplest pattern: update `state.beta` between
 steps, since it's a regular attribute.
 
-```python
+```{code-cell} python
 import math
 
 def temperature(step, total):
-    \"\"\"Geometric annealing from β=0.1 to β=5.\"\"\"
+    """Geometric annealing from beta=0.1 to beta=5."""
     return 0.1 * math.exp(math.log(50) * step / total)
 
-state = fresh_state(beta=0.1)
+set_seed(7)
+total_steps = 200
 chain = MarkovChain(
     proposal=partial(hierarchical_recom, epsilon_base=0.3, epsilon_super=0.3, demand_target=1000),
     constraints=lambda p: True,
     accept=boltzmann,
-    initial_state=state,
-    total_steps=10_000,
+    initial_state=fresh_state(beta=0.1, energy_fn=compute_energy),
+    total_steps=total_steps,
 )
+annealed_energies = []
 for step, s in enumerate(chain):
-    s.beta = temperature(step, 10_000)
+    annealed_energies.append(s.energy)
+    s.beta = temperature(step, total_steps)
+
+print(f"annealed: min={min(annealed_energies):.0f}, "
+      f"final={annealed_energies[-1]:.0f}")
 ```
+
+The fair comparison between schedules is the **best energy found so
+far**, since the optimizer's product is its best plan, not its last one:
+
+```{code-cell} python
+import itertools
+
+def best_so_far(xs):
+    return list(itertools.accumulate(xs, min))
+
+fig, ax = plt.subplots(figsize=(7, 3.2))
+ax.plot(best_so_far(soft_energies), label="fixed β=0.1", color="#5b8cc8")
+ax.plot(best_so_far(opt_energies),  label="fixed β=5.0", color="#c85b5b")
+ax.plot(best_so_far(annealed_energies), label="annealed 0.1→5.0",
+        color="#3f9b6e", lw=2)
+ax.set_xlabel("step")
+ax.set_ylabel("best energy so far")
+ax.legend(fontsize=8)
+ax.set_title("Best-so-far energy: fixed temperatures vs annealing");
+```
+
+On this small grid all three schedules land close together; on larger
+instances the annealed schedule typically wins because early
+exploration escapes the initial partition's basin before the chain
+turns greedy. For real experiments use horizons of 10,000+ steps.
 
 ## Custom acceptance rules
 

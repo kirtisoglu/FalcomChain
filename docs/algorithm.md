@@ -1,8 +1,11 @@
 # Algorithm Overview
 
-This page gives a conceptual overview of FalCom — what it does and how it
-works at a high level. For the full mathematical treatment (theorems, proofs,
-notation), see the **paper**.
+```{admonition} Goal of this page
+:class: tip
+Understand what the chain does at each step and why sampling beats a
+single optimum — no code, no proofs. For the full mathematical
+treatment, see the FalCom paper.
+```
 
 ## The problem
 
@@ -124,6 +127,7 @@ can begin sampling immediately without burn-in.
 ## Where to next
 
 - [Getting started](getting_started.md) — build and run your first chain
-- [Schema reference](schema.md) — what attributes the algorithms read
-- [GeoDataFrame guide](geodataframe.md) — work with shapefiles
+- [Running a FalCom Chain](running_a_chain.md) — the four phases above,
+  as executable code
+- [Ensemble Analysis](ensemble.md) — what the sampled ensemble buys you
 - The **FalCom paper** for proofs, notation, and experiments

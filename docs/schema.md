@@ -1,7 +1,12 @@
 # Graph Attribute Schema
 
-FalcomChain reads and writes specific attributes on graphs. This page is the
-authoritative reference. The schema is defined in
+```{admonition} Goal of this page
+:class: tip
+The authoritative reference for every node, edge, and graph-level
+attribute FalcomChain reads or writes.
+```
+
+FalcomChain reads and writes specific attributes on graphs. The schema is defined in
 [`falcomchain/graph/schema.py`](../falcomchain/graph/schema.py) and validated
 at construction time.
 

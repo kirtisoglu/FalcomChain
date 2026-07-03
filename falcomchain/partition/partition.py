@@ -157,13 +157,13 @@ class Partition:
 
         :param graph: The graph to create the Partition from.
         :type graph: :class:`~falcomchain.graph.Graph`
-        :param teams:The total of number of doctor-nurse teams to hire at centers
+        :param teams: The total of number of doctor-nurse teams to hire at centers
         :type teams: int
         :param capacity_level: The maximum number of doctor nurse teams at a facility
         :type capacity_level: int
         :param epsilon: The maximum relative population deviation from the ideal
-        :type epsilon: float
             population. Should be in [0,1].
+        :type epsilon: float
         :param demand_col: The column of the graph's node data that holds the demand data.
         :type demand_col: str
         :param updaters: Dictionary of updaters

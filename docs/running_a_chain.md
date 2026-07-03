@@ -12,17 +12,22 @@ kernelspec:
 
 # Running a FalCom Chain
 
-This page walks through a complete chain run end-to-end on the shared
-demo grid: building the partition, wrapping it in a `ChainState`,
-choosing a proposal, and iterating. For deeper dives into individual
-pieces, see:
+```{admonition} Goal of this page
+:class: tip
+Understand every knob of a chain run — partition, `ChainState`,
+proposal, acceptance — by running a 300-step chain on the shared demo
+grid and inspecting what it produces.
+```
+
+This page walks through a complete chain run end-to-end. For deeper
+dives into individual pieces, see:
 
 - [Candidate Feasibility](feasibility.md) — verify and repair the
   candidate set before running.
+- [Travel Times](travel_times.md) — real travel-time matrices with
+  FalcomTravel.
 - [Level-2 Facilities](super_facility.md) — opt into level-2 facility
   assignment.
-- [Fixed Superdistricts](fixed_superdistricts.md) — hold the level-2
-  partition constant.
 - [Ensemble Analysis](ensemble.md) — accumulate boundary, facility,
   and capacity statistics across samples.
 
@@ -38,7 +43,8 @@ with open("_static/demo_grid_10x10.json") as f:
 graph = nx.node_link_graph(data, edges="links")
 
 # Manhattan-distance travel times. For real graphs, use FalcomTravel
-# to compute travel times from OSM/road networks.
+# to compute travel times from OSM/road networks — see the
+# "Travel Times with FalcomTravel" page.
 Assignment.travel_times = {
     (a, b): float(
         abs(graph.nodes[a]["C_X"] - graph.nodes[b]["C_X"])
@@ -79,9 +85,8 @@ print(f"{len(partition.parts)} level-1 districts")
 ```
 
 The initial partition has identity level-2 grouping (every level-1
-district is its own superdistrict). For fixed health-zone-style
-groupings, pass `super_assignment=...` here — see
-[Fixed Superdistricts](fixed_superdistricts.md).
+district is its own superdistrict); the first `hierarchical_recom` step
+resamples it.
 
 ## 3. Wrap in a ChainState
 
@@ -133,7 +138,7 @@ chain = MarkovChain(
     constraints=lambda p: True,  # accept all valid topologies
     accept=always_accept,         # pure sampling
     initial_state=state,
-    total_steps=20,
+    total_steps=300,
 )
 ```
 
@@ -167,6 +172,56 @@ print(f"steps observed:        {len(snapshots)}")
 print(f"district count range:  {min(n_districts)} – {max(n_districts)}")
 ```
 
+Two quick diagnostics tell you whether the run behaved. First, the
+district count over time — the capacitated proposal is allowed to change
+it (a merged region can be re-split into a different number of
+districts), and a healthy chain wanders within a narrow band instead of
+drifting:
+
+```{code-cell} python
+import falcomplot as fp
+
+fig = fp.plot_trace(
+    [n_districts], value_label="districts",
+    show_legend=False, title="District count along the chain",
+)
+```
+
+Second, demand balance: the distribution of demand-per-team across all
+sampled districts. Note where it centers — when the total demand does
+not divide evenly by the nominal target `w`, the proposal recenters
+each region on the *achievable* per-team load (total demand over
+`k = ceil(total / w)` teams), so the histogram concentrates around
+that value, slightly below the nominal target, with spread controlled
+by `ε`:
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+per_team = [
+    sum(graph.nodes[v]["demand"] for v in nodes) / s.partition.teams[pid]
+    for s in snapshots[::10]
+    for pid, nodes in s.partition.parts.items()
+]
+
+fig, ax = plt.subplots(figsize=(6.5, 3))
+ax.axvspan(seed_demand_target * (1 - 0.3), seed_demand_target * (1 + 0.3),
+           color="#dfe9f5", label="±ε around achievable load")
+ax.hist(per_team, bins=24, color="#33608c")
+ax.axvline(seed_demand_target, color="#1d3557", lw=1.4,
+           label=f"achievable load ({seed_demand_target:.0f})")
+ax.axvline(1000, color="k", lw=1, ls="--", label="nominal target w")
+ax.set_xlabel("district demand per team")
+ax.set_ylabel("count (every 10th sample)")
+ax.legend(fontsize=8)
+ax.set_title("Demand balance across sampled districts");
+```
+
+A distribution drifting away from the shaded band — or growing a heavy
+tail — would mean the balance constraint is being satisfied only via
+the extremes of the tolerance window, a hint to lower `ε` or revisit
+the target.
+
 ## 6. Visualizing initial vs final partition
 
 The shared demo grid has 5 high-demand "city centers" (clearly
@@ -174,7 +229,7 @@ different colors below) and 95 low-demand rural nodes. After the
 chain runs, every district contains exactly one city — that's the
 heterogeneous demand pulling the partition into a stable shape.
 
-District membership is encoded by node colour, so we don't draw
+District membership is encoded by node color, so we don't draw
 level-1 boundary edges (they'd duplicate that information).
 
 The plot has two facility tiers:
@@ -224,10 +279,10 @@ notebook cell embeds an HTML5 video player.
 from IPython.display import HTML
 from falcomplot import animate_chain
 
-# Subsample to keep the animation responsive — every 2nd snapshot.
+# Subsample to keep the animation responsive — every 10th snapshot.
 # centers_fn pulls per-frame facility centers from each ChainState.
 anim = animate_chain(
-    graph, snapshots[::2], interval=350,
+    graph, snapshots[::10], interval=350,
     centers_fn=lambda state: state.facility.centers,
     super_centers_fn=lambda state: (
         state.super_facility.centers if state.super_facility else None
@@ -303,7 +358,7 @@ future-work variants without forking the library.
   [Candidate Feasibility](feasibility.md).
 - **Set up level-2 facility analysis** for hierarchical questions —
   [Level-2 Facilities](super_facility.md).
-- **Use fixed health zones** instead of resampling the level-2
-  partition — [Fixed Superdistricts](fixed_superdistricts.md).
 - **Aggregate across samples** to find robust boundaries and
   essential facilities — [Ensemble Analysis](ensemble.md).
+- **See every plotting helper** used above in one place —
+  [Visualization with FalcomPlot](visualization.md).

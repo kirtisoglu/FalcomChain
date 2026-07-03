@@ -1,5 +1,12 @@
 # Working with GeoDataFrames
 
+```{admonition} Goal of this page
+:class: tip
+Build a FalcomChain `Graph` from a shapefile, GeoPackage, or GeoJSON —
+column mapping, candidate marking, CRS handling, and the errors you
+will actually hit.
+```
+
 Most users will start from a shapefile, GeoPackage, or GeoJSON of geographic
 units. This guide shows how to build a FalcomChain `Graph` from such data.
 

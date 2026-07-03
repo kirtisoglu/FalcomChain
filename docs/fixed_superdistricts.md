@@ -12,6 +12,14 @@ kernelspec:
 
 # Fixed Superdistricts
 
+```{admonition} Goal of this page
+:class: tip
+An advanced variant: hold an externally given level-2 partition (health
+zones, sales territories) fixed while the chain explores level-1
+districtings within each zone. Most users want the default resampling
+mode instead.
+```
+
 Real-world hierarchical problems often come with the upper-level
 partition already given — health zones, sales territories, school
 districts. In those cases, you don't want the chain to resample the

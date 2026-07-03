@@ -19,7 +19,7 @@ class Validator:
         chain = MarkovChain(proposal, is_valid, accept, initial_state, total_steps)
 
     :ivar constraints: List of validator functions that will check partitions.
-    :  type constraints: List[Callable]
+    :type constraints: List[Callable]
     """
 
     def __init__(self, constraints: List[Callable]) -> None:

@@ -72,12 +72,10 @@ class SpanningTree:
     :type ideal_demand: float
     :ivar epsilon: The tolerance for demand deviation from the ideal demand within each district.
     :type epsilon: float
-    :ivar preccessor: The predecessor
-    :type preccessor: Dict
-    :ivar successor:
-    :type successor: Dict
-    :ivar
-    :type
+    :ivar predecessors: A dictionary mapping nodes to their BFS predecessors.
+    :type predecessors: Dict
+    :ivar successors: A dictionary mapping nodes to their BFS successors.
+    :type successors: Dict
     """
 
     __slots__ = (

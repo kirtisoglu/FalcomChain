@@ -12,6 +12,13 @@ kernelspec:
 
 # Candidate Feasibility
 
+```{admonition} Goal of this page
+:class: tip
+Verify that your candidate set satisfies Assumption 6.1 before running
+a chain, and repair it with artificial candidates when it does not —
+including how to choose among the six placement strategies.
+```
+
 The FalCom chain converges to a unique stationary distribution only
 when the candidate set is dense enough that no facility-free region of
 the graph can form a valid district on its own. This page shows how to
@@ -35,7 +42,7 @@ cannot make progress. Verification is `O(|V| + |E|)` via a single BFS.
 
 ```{note}
 The paper states the condition with ``c_min = 1`` (the chain may
-propose capacity-1 districts). This library generalises: pass
+propose capacity-1 districts). This library generalizes: pass
 ``c_min=2`` (or higher) to opt into a stricter algorithm. The
 threshold then scales linearly, so far fewer candidates are needed.
 The trade-off: the chain explores a smaller state space (no
@@ -156,40 +163,68 @@ sample = next(iter(added))
 dict(graph.nodes[sample])
 ```
 
-## Comparing the three strategies
+## Comparing the placement strategies
 
-The same violating grid, repaired three ways. We reload a fresh copy
-each time so the strategies don't see each other's additions.
+`repair_facility_density` ships six placement strategies. The same
+violating grid, repaired each way — we reload a fresh copy each time so
+the strategies don't see each other's additions. (`metis_separator`
+requires the optional `pymetis` dependency, so we skip it gracefully
+when absent.)
 
 ```{code-cell} python
 def fresh_graph():
     with open("_static/demo_grid_10x10.json") as f:
         return nx.node_link_graph(json.load(f), edges="links")
 
+strategies = (
+    "highest_demand", "center", "weighted_center",
+    "fast_center", "balanced_separator", "metis_separator",
+)
+
 results = {}
-for strategy in ("highest_demand", "center", "weighted_center"):
-    g = fresh_graph()
-    added_s = repair_facility_density(
-        g, demand_target=1000, epsilon=0.1, strategy=strategy
-    )
-    results[strategy] = len(added_s)
+for strategy in strategies:
+    try:
+        g = fresh_graph()
+        added_s = repair_facility_density(
+            g, demand_target=1000, epsilon=0.1, strategy=strategy
+        )
+        results[strategy] = len(added_s)
+    except ImportError:
+        print(f"{strategy}: skipped (optional dependency not installed)")
 
 results
+```
+
+```{code-cell} python
+import matplotlib.pyplot as plt
+
+fig, ax = plt.subplots(figsize=(7, 3))
+names = list(results)
+ax.barh(names, [results[n] for n in names], color="#33608c")
+ax.set_xlabel("artificial candidates added (fewer is better)")
+ax.set_title("Repair cost by placement strategy")
+ax.invert_yaxis()
+for i, n in enumerate(names):
+    ax.text(results[n] + 0.05, i, str(results[n]), va="center", fontsize=9)
 ```
 
 The center-based strategies typically need fewer or as-few candidates,
 because removing a graph center fragments the violating component
 more aggressively. With near-uniform demand, `highest_demand` falls
-back to an arbitrary tiebreaker and can perform worse.
+back to an arbitrary tiebreaker and can perform worse. Separator
+strategies shine on large heterogeneous-demand graphs, where they
+produce the smallest scaffolds.
 
 ## When to use which
 
 | Situation | Strategy |
 |-----------|----------|
 | You want exactly the paper's procedure | `highest_demand` |
-| Large graph (>10⁵ nodes), repair speed matters | `highest_demand` |
+| Large graph (>10⁵ nodes), repair speed matters | `highest_demand` or `fast_center` |
 | Default real-world case | `weighted_center` |
 | You don't trust the demand attribute | `center` |
+| Very large graph, no external deps | `balanced_separator` |
+| Heterogeneous demand, smallest scaffold | `metis_separator` (needs `pymetis`) |
 
 ## API reference
 

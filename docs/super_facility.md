@@ -12,6 +12,13 @@ kernelspec:
 
 # Level-2 (Super-) Facilities
 
+```{admonition} Goal of this page
+:class: tip
+Opt into two-level facility assignment: mark level-2 candidates,
+enable `SuperFacilityAssignment`, bias the supergraph cut toward good
+hub locations, and read the result.
+```
+
 FalcomChain supports two-level hierarchical facility location: each
 *superdistrict* (a group of level-1 districts) can host a level-2
 facility chosen from its own candidate set `F²`. Level-2 facility
@@ -160,6 +167,25 @@ for sid, l1_ids in list(new_state.partition.super_parts.items())[:3]:
     print(f"  super_id {sid}: level-1 districts {sorted(l1_ids)}")
 ```
 
+The full two-level picture — district colors, level-1 facility stars
+with team counts, super-district boundaries (thick black edges), and
+level-2 facility diamonds:
+
+```{code-cell} python
+from falcomplot import plot_partition
+
+plot_partition(
+    graph, new_state,
+    title="After one hierarchical step — both facility tiers",
+    demand_target=1000, c_min=1, c_max=2, epsilon=0.3,
+    demand_target_super=1000, c_max_super=2, epsilon_super=0.3,
+);
+```
+
+Superdistricts spanning several level-1 districts are outlined by the
+thick boundary; each carries one diamond (its level-2 facility) as long
+as a super-candidate exists inside it.
+
 ## A custom selector
 
 `SuperFacilityAssignment.from_state` takes a `selection_fn` callable.
@@ -172,7 +198,7 @@ from falcomchain.markovchain.facility import minimax_super_selector
 
 def demand_weighted_super_selector(super_id, super_candidates, base_nodes,
                                    travel_times):
-    \"\"\"Pick c minimizing max(demand[v] * dist(c, v)) over base_nodes.\"\"\"
+    """Pick c minimizing max(demand[v] * dist(c, v)) over base_nodes."""
     # ... your logic ...
 
 state = ChainState.initial(
@@ -247,7 +273,7 @@ constituent base nodes contain no super-candidate.
 
 ### `minimax_super_selector(super_id, super_candidates, base_nodes, travel_times)`
 
-The default Eq. 18 minimax: pick the super-candidate minimising the
+The default Eq. 18 minimax: pick the super-candidate minimizing the
 maximum travel time to any base node in the superdistrict. Returns
 `(best_candidate, covering_radius)`.
 

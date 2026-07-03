@@ -59,10 +59,11 @@ docs = [
     "myst-parser>=2",
     "myst-nb>=1",          # render Jupyter notebooks as docs pages
     "ipykernel>=6",        # required by myst-nb to execute notebooks
-    # Companion plotting library used by the executable doc pages.
-    # Once falcomplot ships to PyPI, replace the git URL with a versioned
-    # pin (e.g., "falcomplot>=0.1").
+    # Companion libraries used by the executable doc pages.
+    # Once they ship to PyPI, replace the git URLs with versioned pins
+    # (e.g., "falcomplot>=0.1").
     "falcomplot @ git+https://github.com/kirtisoglu/FalcomPlot.git@main",
+    "falcomtravel @ git+https://github.com/kirtisoglu/FalcomTravel.git@main",
 ]
 dev = [
     "pytest>=8",

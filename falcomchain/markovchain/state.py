@@ -15,7 +15,7 @@ class ChainState:
 
     :ivar partition:           The underlying partition state.
     :ivar energy:              E(s) — access energy of this state.
-    :ivar log_proposal_ratio:  log( q(s|s') / q(s'|s) ) from the proposal.
+    :ivar log_proposal_ratio:  ``log( q(s|s') / q(s'|s) )`` from the proposal.
     :ivar beta:                Inverse temperature (>= 0).
     :ivar feasible:            R(s') — hard constraint indicator.
     """
@@ -114,7 +114,7 @@ class ChainState:
 
         :param partition:          Proposed partition.
         :param energy:             E(s') of the proposed state.
-        :param log_proposal_ratio: log( q(s|s') / q(s'|s) ).
+        :param log_proposal_ratio: ``log( q(s|s') / q(s'|s) )``.
         :param feasible:           Whether s' passes all hard constraints.
         """
         state = ChainState.__new__(ChainState)

@@ -59,19 +59,24 @@ Requires **Python 3.12+**.
 
 Full documentation, tutorials, and API reference: **[falcomchain.readthedocs.io](https://falcomchain.readthedocs.io)**.
 
-You can also browse the documentation sources:
+You can also browse the documentation sources. The docs cover the whole
+FalCom family — FalcomTravel and FalcomPlot are documented there too,
+not on separate sites:
 
 |                                                       |                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------- |
-| [Getting started](docs/getting_started.md)            | 5-minute tutorial                                                |
+| [Getting started](docs/getting_started.md)            | Install and run a complete first chain in five minutes           |
 | [Algorithm overview](docs/algorithm.md)               | What FalCom does, conceptually                                   |
-| [Graph schema](docs/schema.md)                        | Required and optional graph attributes                           |
 | [GeoDataFrame guide](docs/geodataframe.md)            | Building graphs from shapefiles/GeoJSON                          |
+| [Travel times](docs/travel_times.md)                  | Travel-time matrices with FalcomTravel                           |
 | [Candidate feasibility](docs/feasibility.md)          | Verify Assumption 6.1 and add artificial candidates              |
-| [Ensemble analysis](docs/ensemble.md)                 | Boundary, facility, and capacity statistics across MCMC samples  |
+| [Running a chain](docs/running_a_chain.md)            | Every knob of a chain run, end to end                            |
 | [Level-2 facilities](docs/super_facility.md)          | Opt-in super-facility assignment (Eq. 18) with pluggable selector |
-| [Fixed superdistricts](docs/fixed_superdistricts.md)  | Hold the level-2 partition fixed (e.g. health zones)             |
-| [Code structure](docs/structure.md)                   | Module-by-module breakdown                                       |
+| [Optimization methods](docs/optimization_methods.md)  | Boltzmann acceptance, annealing, custom objectives               |
+| [Ensemble analysis](docs/ensemble.md)                 | Boundary, facility, and capacity statistics across MCMC samples  |
+| [Visualization](docs/visualization.md)                | Every FalcomPlot helper in one tour                              |
+| [Case study](docs/working_with_real_data.md)          | The London Ambulance Service pipeline on real data               |
+| [Graph schema](docs/schema.md)                        | Required and optional graph attributes                           |
 | [Tutorials](docs/tutorials/)                          | Jupyter notebook walkthroughs                                    |
 
 ---
