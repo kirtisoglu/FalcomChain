@@ -342,11 +342,11 @@ report = ensemble.report()
 | Component | How to swap | Default |
 |-----------|-------------|---------|
 | Spanning-tree sampler | `bipartition_tree(tree_sampler=...)` | Wilson's uniform |
-| Candidate-awareness ψ | `CutParams(psi_fn=...)` | `phi · exp(-γ · r)` |
+| Candidate-awareness ψ | `CutParams(psi_fn=...)` | `1[admissible] · exp(-γ · η)` (uniform at γ = 0) |
 | Energy function (objective, opt-in) | `ChainState.initial(energy_fn=...)` | `None` — sampler mode; pass `compute_energy` for the optimizer |
 | Acceptance rule | `MarkovChain(accept=...)` | `always_accept` |
 | Distance metric | `Assignment.travel_times` | `None` |
-| Level-2 facility selector | `SuperFacilityAssignment.from_state(selection_fn=...)` | `minimax_super_selector` |
+| Level-2 facility selector | `SuperFacilityAssignment.from_state(selection_fn=...)` | `median_super_selector` (demand-weighted 1-median) |
 | Upper-level partitioner | `hierarchical_recom(super_partitioner=...)` | `resample_super_partition` |
 
 Every algorithmic choice is configurable so you can test the paper's

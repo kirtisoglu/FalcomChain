@@ -101,9 +101,8 @@ state = ChainState.initial(..., energy_fn=equity_energy)
 sampler. It omits the proposal-density ratio ``q(s|s')/q(s'|s)`` because
 that ratio is intractable for FalCom (paper Section 6.3, #P-hard per
 Jerrum & Sinclair). The chain is *biased toward low-energy states* but
-does **not** sample from a Boltzmann distribution. For sampling with
-convergence guarantees, use ``always_accept`` and don't set
-``energy_fn`` at all.
+does **not** sample from a Boltzmann distribution. For sampling, use
+``always_accept`` and don't set ``energy_fn`` at all.
 ```
 
 ```{note}

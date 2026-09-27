@@ -153,6 +153,7 @@ class Partition:
         super_psi_fn: Optional[Callable] = None,
         max_attempts: int = 5000,
         count_candidates: bool = True,
+        local_target: bool = True,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -207,6 +208,7 @@ class Partition:
                 enforce_global_balance=enforce_global_balance,
                 psi_fn=psi_fn, super_psi_fn=super_psi_fn,
                 max_attempts=max_attempts, count_candidates=count_candidates,
+                local_target=local_target,
             )
         partition = cls._from_random_global(
             graph, epsilon, demand_target, capacity_level, density,
@@ -323,8 +325,18 @@ class Partition:
         super_psi_fn: Optional[Callable] = None,
         max_attempts: int = 5000,
         count_candidates: bool = True,
+        local_target: bool = True,
     ) -> "Partition":
-        """Partition each superdistrict (zone) independently and stitch."""
+        """Partition each superdistrict (zone) independently and stitch.
+
+        With ``local_target=True`` (default) each zone is cut against its own
+        per-team target ``zone_demand / zone_teams`` (paper, Remark A.5), so
+        the debt telescopes to zero inside every zone and the last district
+        of a zone is not asked to absorb the zone's rounding remainder. The
+        zone targets differ from ``demand_target`` by at most one part in
+        ``zone_teams``; the chain re-cuts every super-district against its
+        local target anyway.
+        """
         # Validate: every node in the graph must have a superdistrict.
         missing = [n for n in graph.nodes if n not in super_assignment]
         if missing:
@@ -358,10 +370,11 @@ class Partition:
                     f"{c_min} needs within tolerance; cannot allocate any team."
                 )
 
+            zone_target = (zone_pop / zone_teams) if local_target else demand_target
             zone_flip = capacitated_recursive_tree(
                 graph=zone_subgraph,
                 n_teams=zone_teams,
-                demand_target=demand_target,
+                demand_target=zone_target,
                 epsilon=epsilon,
                 capacity_level=capacity_level,
                 density=density,

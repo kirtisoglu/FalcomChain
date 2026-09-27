@@ -48,6 +48,16 @@ adheres to [Semantic Versioning](https://semver.org/).
   `median_super_selector` (demand-weighted 1-median). `minimax_super_selector`
   is kept as an alias.
 
+- Zone-based initialization (`Partition.from_random_assignment(super_assignment=...)`)
+  cuts each zone against its own per-team target (`local_target=True`,
+  paper Remark A.5), so the debt telescopes to zero inside every zone. On
+  the London instance this initializes the 66-station problem in seconds
+  where the global recursion often fails.
+- Docs: the algorithm page no longer cites a convergence theorem the paper
+  does not contain; level-2 facilities are described as the 1-median;
+  Assumption 6.1 is presented as a sufficient condition and candidate repair
+  as an optional initialization aid.
+
 ### Fixed
 - In two-sided mode the root cut could extract the whole residual with fewer
   teams than remained, leaving an empty residual (surfaced as `IndexError`
