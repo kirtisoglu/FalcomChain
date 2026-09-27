@@ -50,6 +50,15 @@ class CutSearchExhausted(ProposalRejected):
         super().__init__(message)
 
 
+class SuperDistrictTooSmall(ProposalRejected):
+    """
+    Raised by ``hierarchical_recom`` when the lower-level re-partition of the
+    selected super-district produces fewer than ``min_districts_super``
+    (paper: kappa^2_min) districts, e.g. when two unit-capacity districts are
+    re-cut into a single capacity-2 district. Treated as a rejected proposal.
+    """
+
+
 class PopulationBalanceError(ProposalRejected):
     """
     Raised when an extracted district violates the per-team demand window

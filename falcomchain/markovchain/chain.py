@@ -29,7 +29,11 @@ from typing import Callable, Iterable, Optional, Union
 
 from falcomchain.constraints import Bounds, Validator
 from falcomchain.partition import Partition
-from falcomchain.tree.errors import CutSearchExhausted, PopulationBalanceError
+from falcomchain.tree.errors import (
+    CutSearchExhausted,
+    PopulationBalanceError,
+    SuperDistrictTooSmall,
+)
 
 from .state import ChainState
 
@@ -45,11 +49,15 @@ def classify_rejection(exc: BaseException) -> str:
       candidate-free or under-provisioned residual);
     - ``"cut_search_exhausted:super"`` -- the supergraph recursion stranded a
       final supernode against the discrete capacity constraints;
+    - ``"super_district_below_kappa"`` -- the base-level re-cut left the
+      selected super-district with fewer than ``min_districts_super`` districts;
     - ``"balance_violation"``          -- the safety-net per-team check failed;
     - ``"runtime_error"``              -- any other ``RuntimeError``.
     """
     if isinstance(exc, CutSearchExhausted):
         return f"cut_search_exhausted:{exc.level}"
+    if isinstance(exc, SuperDistrictTooSmall):
+        return "super_district_below_kappa"
     if isinstance(exc, PopulationBalanceError):
         return "balance_violation"
     return "runtime_error"

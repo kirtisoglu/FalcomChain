@@ -6,6 +6,7 @@ from typing import Callable, Optional, Tuple
 from falcomchain.random import rng
 
 from falcomchain.partition import Partition
+from falcomchain.tree.errors import SuperDistrictTooSmall
 from falcomchain.tree.tree import (
     Cut,
     Flip,
@@ -209,6 +210,18 @@ def hierarchical_recom(
         iteration=partition.step,
     )
     flip = flip.add_merged_ids(merge)
+
+    # The kappa constraint (every super-district bundles at least
+    # ``min_districts_super`` districts) is enforced at the supergraph cut;
+    # the base-level re-cut can still merge a super-district's districts
+    # into fewer than kappa (e.g. two unit-capacity districts into one of
+    # capacity 2), which the paper's formulation forbids. Reject such
+    # proposals so every sampled state satisfies the constraint.
+    if min_districts_super > 1 and len(flip.new_ids) < min_districts_super:
+        raise SuperDistrictTooSmall(
+            f"lower-level re-partition produced {len(flip.new_ids)} district(s) "
+            f"in a super-district that must hold at least {min_districts_super}"
+        )
 
     # Pure Boltzmann acceptance: ignore forward proposal density since we
     # don't compute the reverse term (see GerryChain, Cannon et al. 2022).

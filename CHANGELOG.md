@@ -59,6 +59,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   as an optional initialization aid.
 
 ### Fixed
+- The kappa constraint (each super-district holds at least
+  `min_districts_super` districts) was enforced at the supergraph cut but not
+  after the base-level re-cut, which could merge a super-district's districts
+  into fewer than kappa; such proposals are now rejected
+  (`SuperDistrictTooSmall`, cause `super_district_below_kappa`).
 - In two-sided mode the root cut could extract the whole residual with fewer
   teams than remained, leaving an empty residual (surfaced as `IndexError`
   on the next draw). The root cut now has to absorb all remaining capacity,
