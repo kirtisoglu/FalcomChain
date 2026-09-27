@@ -534,6 +534,16 @@ class CutParams:
     # single c¹≥c²_min district could form a super-district on its own.
     # Set to 2 to match the MIP's ``min_l1_per_l2 = 2``.
     min_districts_super: int = 1
+    # Candidate admissibility rule at the base level. ``False`` (default)
+    # only requires >= 1 candidate on each side of a cut. ``True`` adds the
+    # *counting predicate*: the residual side, which still has to be cut
+    # into districts carrying the remaining ``r`` teams, must contain at
+    # least ``ceil(r / capacity_level)`` candidates. This is a necessary
+    # condition for the recursion to close, so it does not change the
+    # feasible state space; it only prunes doomed branches early and raises
+    # the acceptance rate per unit of compute when Assumption 6.1 fails
+    # (e.g. real-station candidate sets).
+    count_candidates: bool = False
 
 
 @dataclass(frozen=True)
@@ -599,12 +609,28 @@ def two_sided_cut(h: SpanningTree, density_check) -> List[Cut]:
 def one_sided_cut(h: SpanningTree, density_check):
     cuts = []
     nodes = h.graph.nodes
+    counting = h.params.count_candidates
+
+    def residual_ok(cands_in_residual: int, teams_left: int) -> bool:
+        """Counting predicate: the residual must hold enough candidates for
+        the districts it still has to be cut into (>= ceil(r / c_max))."""
+        if not counting:
+            return True
+        need = -(-teams_left // h.capacity_level) if teams_left > 0 else 0
+        return cands_in_residual >= need
 
     for node in nodes:
         pop = h.graph.nodes[node]["demand"]
 
         for assign_team in range(h.c_min, min(h.capacity_level + 1, h.n_teams + 1)):
-            if h.has_ideal_demand(assign_team, pop) and h.has_facility(node):
+            if (
+                h.has_ideal_demand(assign_team, pop)
+                and h.has_facility(node)
+                and residual_ok(
+                    h.tot_candidates - h.graph.nodes[node]["candidate"],
+                    h.n_teams - assign_team,
+                )
+            ):
                 cuts.append(
                     Cut(
                         node=node,
@@ -614,9 +640,13 @@ def one_sided_cut(h: SpanningTree, density_check):
                         psi=h.psi(node),
                     )
                 )
-            elif h.complement_has_the_ideal_demand(
-                assign_team, pop
-            ) and h.complement_has_facility(node):
+            elif (
+                h.complement_has_the_ideal_demand(assign_team, pop)
+                and h.complement_has_facility(node)
+                and residual_ok(
+                    h.graph.nodes[node]["candidate"], h.n_teams - assign_team
+                )
+            ):
                 complement_phi = h.tot_candidates - h.graph.nodes[node]["candidate"]
                 psi_complement = (
                     float(complement_phi) if h.params.gamma == 0.0
@@ -821,6 +851,7 @@ def bipartition_tree(
     tau_global: Optional[float] = None,
     d_bar_orig: Optional[float] = None,
     min_districts_super: int = 1,
+    count_candidates: bool = False,
 ) -> Cut:
     """
     Finds a balanced 2-partition of a graph by drawing a spanning tree and
@@ -874,6 +905,7 @@ def bipartition_tree(
                 rule=rule,
                 debt=debt,
                 min_districts_super=min_districts_super,
+                count_candidates=count_candidates,
             ),
             supergraph=supergraph,
         )
@@ -1007,6 +1039,7 @@ def capacitated_recursive_tree(
     rule: str = "per_team",
     enforce_global_balance: bool = False,
     min_districts_super: int = 1,
+    count_candidates: bool = False,
 ) -> Flip:
     """
      Recursively partitions a graph into balanced districts using bipartition_tree.
@@ -1150,6 +1183,7 @@ def capacitated_recursive_tree(
                 d_bar_orig=demand_target
                             if (enforce_global_balance and not supergraph) else None,
                 min_districts_super=min_districts_super if supergraph else 1,
+                count_candidates=count_candidates and not supergraph,
             )
 
         except Exception:

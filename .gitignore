@@ -62,3 +62,4 @@ rjavaenv/
 # ---- Paper drafts (live in a separate paper repo) ----
 paper/
 *.pdf
+reversible_prototype/

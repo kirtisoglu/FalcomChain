@@ -151,6 +151,8 @@ class Partition:
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
+        max_attempts: int = 5000,
+        count_candidates: bool = False,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -210,6 +212,7 @@ class Partition:
             c_min=c_min, rule=rule,
             enforce_global_balance=enforce_global_balance,
             psi_fn=psi_fn, super_psi_fn=super_psi_fn,
+            max_attempts=max_attempts, count_candidates=count_candidates,
         )
         if init_super_partition:
             partition._init_super_partition_recursive(
@@ -281,6 +284,8 @@ class Partition:
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
+        max_attempts: int = 5000,
+        count_candidates: bool = False,
     ) -> "Partition":
         total_pop = sum(graph.nodes[n]["demand"] for n in graph)
         n_teams = math.ceil(total_pop / demand_target)
@@ -297,6 +302,8 @@ class Partition:
             enforce_global_balance=enforce_global_balance,
             psi_fn=psi_fn,
             super_psi_fn=super_psi_fn,
+            max_attempts=max_attempts,
+            count_candidates=count_candidates,
         )
 
         return cls(
