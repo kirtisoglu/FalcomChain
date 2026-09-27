@@ -168,21 +168,25 @@ class SpanningTree:
         Admissibility of a district with demand ``demand`` at capacity ``c``
         under the active balance rule (``params.rule``).
 
-        ``ideal_demand`` / ``epsilon`` carry the debt-corrected *per-team*
+        ``ideal_demand`` / ``epsilon`` carry the debt-clipped *per-team*
         window ``[L~, U~] = d'[1 - e', 1 + e']`` computed by
-        :func:`capacitated_recursive_tree` (paper eqs. (Li)-(Ui)).
+        :func:`capacitated_recursive_tree`.
 
-        - ``"paper"`` (default): the paper's capacity-indexed window
-          ``I^(r)(c) = c · [L~, U~]``, i.e. ``|demand - c d'| <= c d' e'``.
-        - ``"per_team"`` (legacy): same centre but an *absolute* half-width
-          ``d' e'`` for every ``c`` -- ``c`` times narrower than the paper's
-          window for ``c >= 2``.
+        - ``"per_team"`` (default): centre ``c · d'`` and the *same* absolute
+          half-width ``d' e' = (U~ - L~)/2`` for every capacity ``c``. This
+          keeps the running debt within one per-team tolerance for every
+          ``c <= 3`` (the debt moves by at most ``tau`` per extraction), so a
+          recursion with ``c_max <= 3`` can never reach an empty window.
+        - ``"scaled"``: the capacity-scaled window ``c · [L~, U~]``, i.e.
+          ``|demand - c d'| <= c d' e'``. Wider for ``c >= 2`` but the debt can
+          move by ``c · tau`` per step and leave the feasible envelope for
+          ``c >= 3``; kept for comparison.
         - ``"main"`` (legacy): window of half-width ``e c d'`` shifted by
           twice the debt in the corrective direction.
         """
         rule = self.params.rule
         d_bar = self.ideal_demand
-        if rule == "paper":
+        if rule == "scaled":
             return abs(demand - c * d_bar) <= c * d_bar * self.epsilon
         if rule == "main":
             tau = self.epsilon * c * d_bar
@@ -530,13 +534,14 @@ class CutParams:
     # ``falcomchain.markovchain.super_scoring`` for the paper's Eq. 27 default.
     super_psi_fn: Optional[Any] = None  # Callable[[frozenset, int], float]
     recorder: Optional[Any] = None  # Recorder instance for substep recording
-    # Balance rule, see ``SpanningTree._in_window``. "paper" (default): the
-    # paper's debt-corrected window I^(r)(c) = c·[L~, U~] -- ideal_demand and
-    # epsilon encode the clipped per-team window [L~, U~]. "per_team"
-    # (legacy): same centre, absolute half-width d'·e' for every c.
-    # "main" (legacy): half-width e·c·d' shifted by twice the debt; under
-    # "main" ideal_demand is the unclipped d̄ and `debt` carries δ^(r-1).
-    rule: str = "paper"
+    # Balance rule, see ``SpanningTree._in_window``. "per_team" (default):
+    # centre c·d' with the same absolute half-width d'·e' for every c, where
+    # ideal_demand / epsilon encode the debt-clipped per-team window [L~, U~];
+    # keeps |debt| <= tau for c <= 3. "scaled": the capacity-scaled window
+    # c·[L~, U~]. "main" (legacy): half-width e·c·d' shifted by twice the
+    # debt; under "main" ideal_demand is the unclipped d̄ and `debt` carries
+    # δ^(r-1).
+    rule: str = "per_team"
     debt: float = 0.0
     # Minimum number of level-1 districts per super-district (paper's
     # min-L1-per-L2). Enforced only at the supergraph level by
@@ -853,7 +858,7 @@ def bipartition_tree(
     super_psi_fn=None,
     recorder=None,
     c_min: int = 1,
-    rule: str = "paper",
+    rule: str = "per_team",
     debt: float = 0.0,
     enforce_global_balance: bool = False,
     tau_global: Optional[float] = None,
@@ -1050,7 +1055,7 @@ def capacitated_recursive_tree(
     gamma: float = 0.0,
     travel_times=None,
     psi_fn=None,
-    rule: str = "paper",
+    rule: str = "per_team",
     enforce_global_balance: bool = False,
     min_districts_super: int = 1,
     count_candidates: bool = True,
@@ -1139,8 +1144,8 @@ def capacitated_recursive_tree(
                     "rule": "main",
                 })
         else:
-            # "paper" (default) and "per_team": clip the per-team window by
-            # the running debt (paper eqs. (Li)-(Ui)) and pass it on as
+            # "per_team" (default) and "scaled": clip the per-team window by
+            # the running debt and pass it on as
             # (d', e') = ((L~+U~)/2, (U~-L~)/(L~+U~)); the two rules then
             # differ only in how the window scales with capacity (see
             # SpanningTree._in_window).

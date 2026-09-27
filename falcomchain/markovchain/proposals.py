@@ -51,7 +51,7 @@ def hierarchical_recom(
     c_max_super: Optional[int] = None,
     min_districts_super: int = 1,
     max_attempts_super: int = 1000,
-    rule: str = "paper",
+    rule: str = "per_team",
     enforce_global_balance: bool = False,
     max_attempts_base: int = 5000,
     count_candidates_base: bool = True,

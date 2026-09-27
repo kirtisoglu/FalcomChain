@@ -7,6 +7,7 @@ proposals were rejected.
 import math
 from functools import partial
 
+import networkx as nx
 import pytest
 
 from falcomchain import MarkovChain, Partition, always_accept, hierarchical_recom
@@ -43,24 +44,40 @@ def test_assumption_fails_on_the_sparse_grid(sparse_grid):
     assert not check_facility_density(sparse_grid, demand_target=w, epsilon=0.15).passes
 
 
-def test_initial_partition_needs_the_counting_predicate(sparse_grid):
-    w, seed_target = _targets(sparse_grid)
-    set_seed(1)
-    with pytest.raises(CutSearchExhausted) as info:
-        Partition.from_random_assignment(
-            graph=sparse_grid, epsilon=0.15, demand_target=seed_target,
-            assignment_class=None, capacity_level=2,
-            count_candidates=False, max_attempts=100,
-        )
-    assert info.value.level == "base"
-    assert isinstance(info.value, RuntimeError)   # the chain treats it as a rejection
+def test_counting_predicate_blocks_cuts_that_strand_the_residual():
+    """Path 0-1-2-3-4-5 with candidates only at its ends, three teams of
+    capacity 1 to place: any first cut leaves a residual with one candidate
+    that still has to become two districts. The counting predicate rejects
+    every such cut; without it the (doomed) cuts are admissible, and each of
+    them still keeps a candidate on both sides."""
+    from falcomchain.tree.tree import CutParams, SpanningTree, one_sided_cut
 
+    g = nx.path_graph(6)
+    for n in g.nodes:
+        g.nodes[n].update(demand=10, area=1, candidate=1 if n in (0, 5) else 0)
+    base = dict(ideal_demand=20.0, epsilon=0.5, capacity_level=1, n_teams=3, two_sided=False)
+    set_seed(3)
+    with_counting = SpanningTree(graph=g, params=CutParams(count_candidates=True, **base))
+    assert one_sided_cut(with_counting, None) == []
+    set_seed(3)
+    without = SpanningTree(graph=g, params=CutParams(count_candidates=False, **base))
+    cuts = one_sided_cut(without, None)
+    assert cuts
+    for cut in cuts:
+        inside = {n for n in cut.subnodes if g.nodes[n]["candidate"]}
+        outside = {n for n in set(g.nodes) - set(cut.subnodes) if g.nodes[n]["candidate"]}
+        assert inside and outside
+
+
+def test_initial_partition_on_sparse_candidates(sparse_grid):
+    w, seed_target = _targets(sparse_grid)
     set_seed(1)
     partition = Partition.from_random_assignment(
         graph=sparse_grid, epsilon=0.15, demand_target=seed_target,
         assignment_class=None, capacity_level=2,   # counting is the default
     )
     assert all(partition.assignment.candidates[p] for p in partition.parts)
+    assert isinstance(CutSearchExhausted("base", 1), RuntimeError)   # rejected, not crashed
 
 
 def test_chain_runs_on_sparse_candidates_and_reports_rejections(sparse_grid):

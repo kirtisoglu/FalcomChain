@@ -7,14 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
-- **The paper's debt-corrected window is the default balance rule**
-  (`rule="paper"`): a district at capacity `c` is admissible iff its demand
-  lies in `c · [L~, U~]`, the debt-clipped per-team window scaled by `c`
-  (paper eqs. (Li)-(Ui)). The previous default `"per_team"` used an
-  absolute half-width for every `c` and was therefore `c` times stricter
-  than the paper for `c >= 2`; it and `"main"` remain selectable as legacy
-  rules. `tests/test_debt_rule.py` checks Theorem A.1, Corollaries A.2-A.3
-  and Remark A.5 numerically on the instrumented recursion.
+- **Balance rules named and checked.** The default rule keeps its behaviour
+  and its name (`rule="per_team"`): the debt-clipped per-team window
+  `[L~, U~]` with the *same absolute half-width* `(U~ - L~)/2` for every
+  capacity `c`. The paper's capacity-scaled window `c · [L~, U~]` is available
+  as `rule="scaled"` for comparison. The absolute rule moves the debt by at
+  most one tolerance per extraction and keeps `|delta| <= tau` for every
+  `c <= 3`, which is why a recursion with `c_max <= 3` (the London calibration)
+  never meets an empty window; under the scaled rule the debt can move by
+  `c · tau` and the recursion frequently fails at `c_max = 3` (on a 12x12
+  test grid 12/12 seeds close under the absolute rule versus 7/12 under the
+  scaled one; on the London instance initialization failed under the scaled
+  rule). `tests/test_debt_rule.py` verifies containment, the debt-evolution
+  interval, the `|delta| <= tau` invariant and telescoping on the instrumented
+  recursion. The paper's Section 5.3 and Appendix A are to be rewritten to the
+  absolute rule.
 - **Cut selection is uniform over admissible cuts at `gamma = 0`** at both
   levels, as the paper describes. Previously level-1 cuts were weighted by
   the number of candidates in the subtree (and by the product of both
