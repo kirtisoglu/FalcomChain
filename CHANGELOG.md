@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **The paper's debt-corrected window is the default balance rule**
+  (`rule="paper"`): a district at capacity `c` is admissible iff its demand
+  lies in `c · [L~, U~]`, the debt-clipped per-team window scaled by `c`
+  (paper eqs. (Li)-(Ui)). The previous default `"per_team"` used an
+  absolute half-width for every `c` and was therefore `c` times stricter
+  than the paper for `c >= 2`; it and `"main"` remain selectable as legacy
+  rules. `tests/test_debt_rule.py` checks Theorem A.1, Corollaries A.2-A.3
+  and Remark A.5 numerically on the instrumented recursion.
+- **Cut selection is uniform over admissible cuts at `gamma = 0`** at both
+  levels, as the paper describes. Previously level-1 cuts were weighted by
+  the number of candidates in the subtree (and by the product of both
+  sides' counts in two-sided mode) and level-2 cuts by their capacity;
+  neither weighting was stated anywhere. `psi = 1[admissible] · exp(-gamma·eta)`;
+  the complement's score uses the complement's own `eta` instead of a proxy.
 - **Counting predicate is the default level-1 admissibility rule**
   (`count_candidates=True` in `CutParams`, `bipartition_tree`,
   `capacitated_recursive_tree`, `hierarchical_recom(count_candidates_base=True)`

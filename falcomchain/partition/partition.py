@@ -147,7 +147,7 @@ class Partition:
         c_min_super: int = 1,
         c_max_super: Optional[int] = None,
         min_districts_super: int = 1,
-        rule: str = "per_team",
+        rule: str = "paper",
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
@@ -281,7 +281,7 @@ class Partition:
     @classmethod
     def _from_random_global(
         cls, graph, epsilon, demand_target, capacity_level, density,
-        c_min: int = 1, rule: str = "per_team",
+        c_min: int = 1, rule: str = "paper",
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
@@ -317,7 +317,7 @@ class Partition:
     @classmethod
     def _from_random_within_zones(
         cls, graph, epsilon, demand_target, capacity_level, density,
-        super_assignment: Dict, c_min: int = 1, rule: str = "per_team",
+        super_assignment: Dict, c_min: int = 1, rule: str = "paper",
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,

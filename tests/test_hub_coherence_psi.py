@@ -71,8 +71,9 @@ class TestHubCoherencePsiFactory:
         psi = hub_coherence_psi_factory(state, gamma=1.0)
         assert psi(frozenset(), 1) == 0.0
 
-    def test_gamma_zero_returns_teams(self):
-        # γ=0 → ψ²(T_u) = ϕ²(T_u) = teams (still soft-skip if no super-cand).
+    def test_gamma_zero_is_uniform(self):
+        # γ=0 → ψ²(T_u) = 1 for every admissible super-cut (still soft-skip
+        # when the subtree holds no super-candidate).
         state = _make_mock_state(
             parts={"D1": frozenset({1, 2, 3})},
             level1_centers={"D1": 2},
@@ -81,15 +82,15 @@ class TestHubCoherencePsiFactory:
         )
         psi = hub_coherence_psi_factory(state, gamma=0.0)
         assert psi(frozenset({"D1"}), 1) == 1.0
-        assert psi(frozenset({"D1"}), 2) == 2.0
-        assert psi(frozenset({"D1"}), 3) == 3.0
+        assert psi(frozenset({"D1"}), 2) == 1.0
+        assert psi(frozenset({"D1"}), 3) == 1.0
 
     def test_median_formula(self):
         # Two districts D1 = {1,2}, D2 = {4,5}; super-candidates 2 and 5;
         # unit demands and distances |i - j|. The subtree holds both districts.
         # cost(2) = 1 + 0 + 2 + 3 = 6; cost(5) = 4 + 3 + 1 + 0 = 8.
-        # eta² = min(6, 8) / total demand 4 = 1.5; with γ=1, teams=2:
-        # ψ² = 2 · exp(-1.5).
+        # eta² = min(6, 8) / total demand 4 = 1.5; with γ=1: ψ² = exp(-1.5)
+        # (the assigned capacity does not enter the score).
         state = _make_mock_state(
             parts={"D1": frozenset({1, 2}), "D2": frozenset({4, 5})},
             level1_centers={"D1": 1, "D2": 4},
@@ -98,7 +99,7 @@ class TestHubCoherencePsiFactory:
         )
         psi = hub_coherence_psi_factory(state, gamma=1.0)
         result = psi(frozenset({"D1", "D2"}), 2)
-        assert abs(result - 2.0 * math.exp(-1.5)) < 1e-10
+        assert abs(result - math.exp(-1.5)) < 1e-10
 
     def test_skips_candidate_with_missing_travel_time(self):
         # Two super-candidates; one missing a travel-time entry to a facility.
@@ -149,7 +150,7 @@ def manhattan_partition():
 
 class TestHierarchicalRecomWithGammaSuper:
     def test_gamma_super_zero_runs(self, manhattan_partition):
-        # With gamma_super=0, super_psi_fn is None and ψ² = teams.
+        # With gamma_super=0, super_psi_fn is None and ψ² = 1 (uniform).
         from falcomchain.markovchain.facility import SuperFacilityAssignment
 
         # Tag every node as super-candidate so something can be selected.

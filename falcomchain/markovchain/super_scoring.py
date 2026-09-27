@@ -4,10 +4,10 @@ Cut-scoring functions for the supergraph (level-2) cut phase.
 The capacitated tree-cut phase at level 2 selects an admissible subtree
 T_u with probability proportional to a candidate-awareness score
 
-    ψ²(T_u) = ϕ²(T_u) · exp(-γ · η²(T_u))
+    ψ²(T_u) = 1[T_u admissible and holds a super-candidate] · exp(-γ · η²(T_u))
 
-where ϕ²(T_u) is the level-2 feasibility score (= the assigned capacity
-when admissible) and η²(T_u) is the level-2 geometric penalty. Consistent
+where η²(T_u) is the level-2 geometric penalty; at γ = 0 selection is
+uniform over admissible super-cuts. Consistent
 with the disaggregated hierarchical median objective (paper Section 5.4),
 η² is the demand-weighted MEAN distance from the superdistrict's
 demand-weighted 1-median (over base units) to the base units it serves —
@@ -16,8 +16,7 @@ base-level access penalty η¹.
 
 This module provides the default implementation and a factory that binds
 it to a chain state. Pass ``super_psi_fn=None`` to ``hierarchical_recom``
-to fall back to the γ=0 case (ϕ²(T_u) = teams, uniform weighting over
-admissible cuts).
+to fall back to the γ=0 case (uniform weighting over admissible cuts).
 """
 
 import math
@@ -35,7 +34,8 @@ def hub_coherence_psi_factory(
     The returned callable has signature ``(subnodes, teams) -> float``
     suitable for ``CutParams.super_psi_fn``. ``subnodes`` is a frozenset
     of supergraph nodes (level-1 district IDs) in the candidate
-    extraction; ``teams`` is the assigned capacity (= ϕ²(T_u)).
+    extraction; ``teams`` is the assigned capacity (unused by the default
+    score, available to custom scorers).
 
     Level-2 geometric penalty (demand-weighted 1-median, per-capita):
 
@@ -59,7 +59,7 @@ def hub_coherence_psi_factory(
         Must have ``partition.parts`` (level-1 district -> base nodes) and
         ``assignment.travel_times``.
     :param gamma: Inverse-temperature parameter γ ≥ 0. ``gamma=0``
-        reduces to ϕ²(T_u) (uniform weighting).
+        gives uniform weighting over admissible super-cuts.
     :returns: A callable ``(subnodes, teams) -> float``.
     """
     partition = state.partition
@@ -86,9 +86,10 @@ def hub_coherence_psi_factory(
             return 0.0  # ψ² = 0 → cut excluded (soft level-2 constraint)
 
         if gamma == 0.0:
-            # ψ² = ϕ²(T_u) when γ = 0; the soft existence check above
-            # has already excluded subtrees with no super-candidate.
-            return float(teams)
+            # Uniform over admissible super-cuts when γ = 0; the soft
+            # existence check above has already excluded subtrees with no
+            # super-candidate.
+            return 1.0
 
         # η²(T_u): demand-weighted 1-median over base units, per capita.
         total_demand = sum(graph_nodes[v]["demand"] for v in base_nodes)
@@ -108,6 +109,6 @@ def hub_coherence_psi_factory(
         if best_cost == float("inf"):
             return 0.0
 
-        return float(teams) * math.exp(-gamma * best_cost / total_demand)
+        return math.exp(-gamma * best_cost / total_demand)
 
     return super_psi
