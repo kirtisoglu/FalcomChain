@@ -30,7 +30,7 @@ This page walks through the level-2 workflow on the shared demo grid.
 
 ## The candidate sets are independent
 
-Eq. 18 in the paper defines `F² ⊂ V¹` — level-2 candidates are nodes of
+The paper defines `F² ⊂ V¹` — level-2 candidates are nodes of
 the base graph, **not** a subset of the level-1 facility set `F¹`. They
 are an independent property of nodes:
 
@@ -76,7 +76,7 @@ plot_grid(graph, title="Demo grid — level-1 vs level-2 candidate sets");
 
 ## Opting into level-2 facility assignment
 
-By default, `state.super_facility` is `None`. To enable Eq. 18, pass
+By default, `state.super_facility` is `None`. To enable level-2 assignment, pass
 `super_facility_fn=SuperFacilityAssignment.from_state` to
 `ChainState.initial`:
 
@@ -189,16 +189,18 @@ as a super-candidate exists inside it.
 ## A custom selector
 
 `SuperFacilityAssignment.from_state` takes a `selection_fn` callable.
-The default is :func:`minimax_super_selector` (Eq. 18). You can plug in
-any function with the same signature — e.g., demand-weighted minimax,
-or a tie-breaker that prefers certain candidates.
+The default is :func:`median_super_selector`, the demand-weighted
+1-median of the paper's level-2 facility rule (`minimax_super_selector`
+is kept as an alias of it). You can plug in any function with the same
+signature — e.g., a minimax (covering-radius) rule, or a tie-breaker that
+prefers certain candidates.
 
 ```python
-from falcomchain.markovchain.facility import minimax_super_selector
+from falcomchain.markovchain.facility import median_super_selector
 
-def demand_weighted_super_selector(super_id, super_candidates, base_nodes,
-                                   travel_times):
-    """Pick c minimizing max(demand[v] * dist(c, v)) over base_nodes."""
+def minimax_super_selector_custom(super_id, super_candidates, base_nodes,
+                                  demands, travel_times):
+    """Pick c minimizing max(dist(c, v)) over base_nodes (covering radius)."""
     # ... your logic ...
 
 state = ChainState.initial(
@@ -206,7 +208,7 @@ state = ChainState.initial(
     energy=0.0,
     beta=1.0,
     super_facility_fn=lambda s: SuperFacilityAssignment.from_state(
-        s, selection_fn=demand_weighted_super_selector
+        s, selection_fn=minimax_super_selector_custom
     ),
 )
 ```
@@ -217,18 +219,19 @@ The level-2 facility *assignment* (above) runs after the supergraph
 partition has been chosen. To also bias the *cut selection itself*
 toward subtrees that admit well-located level-2 candidates, pass
 ``gamma_super > 0`` to :func:`hierarchical_recom`. With γ² > 0 the
-chain uses the paper's hub-coherence score (Eq. 22, 27):
+chain uses the paper's level-2 coordination penalty:
 
 ```
-ψ²(T_u) = ϕ²(T_u) · exp(-γ² · π²(T_u))
-π²(T_u) = min_{f ∈ F² ∩ V¹[T_u]} max_{v ∈ V(T_u)} d(f, f¹(D_v¹))
+ψ²(T_u) = 1[T_u admissible and holds a super-candidate] · exp(-γ² · η²(T_u))
+η²(T_u) = min_{f ∈ F² ∩ V¹[T_u]} Σ_{v ∈ V¹[T_u]} d_v · d(f, v) / Σ_{v ∈ V¹[T_u]} d_v
 ```
 
-For each super-candidate `f` in the subtree, the inner max is the
-worst-case distance from `f` to any level-1 facility center in `T_u`.
-The outer min picks the candidate with smallest such eccentricity.
-Subtrees with no super-candidate get π² = +∞ and are filtered out
-(soft level-2 constraint, paper Section 5.5).
+For each super-candidate `f` in the subtree, the inner sum is the total
+demand-weighted distance from `f` to every base unit of the subtree; the
+outer min picks the demand-weighted 1-median and the division makes the
+penalty per capita. Subtrees with no super-candidate score 0 and are
+filtered out (soft level-2 constraint). At γ² = 0 every admissible
+super-cut scores 1.
 
 ```python
 from falcomchain import hierarchical_recom
@@ -268,14 +271,15 @@ Compute level-2 facilities for every superdistrict in
 constituent base nodes contain no super-candidate.
 
 - `selection_fn` — callable
-  `(super_id, super_candidates, base_nodes, travel_times) -> (node, radius)`.
-  Default: :func:`minimax_super_selector`.
+  `(super_id, super_candidates, base_nodes, demands, travel_times) -> (node, cost)`.
+  Default: :func:`median_super_selector`.
 
-### `minimax_super_selector(super_id, super_candidates, base_nodes, travel_times)`
+### `median_super_selector(super_id, super_candidates, base_nodes, demands, travel_times)`
 
-The default Eq. 18 minimax: pick the super-candidate minimizing the
-maximum travel time to any base node in the superdistrict. Returns
-`(best_candidate, covering_radius)`.
+The default level-2 rule: pick the super-candidate minimizing the total
+demand-weighted travel time to the base nodes of the superdistrict
+(demand-weighted 1-median). Returns `(best_candidate, access_cost)`.
+`minimax_super_selector` is an alias kept for backward compatibility.
 
 ### `ChainState.initial(..., super_facility_fn=None)`
 

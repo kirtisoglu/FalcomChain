@@ -235,8 +235,8 @@ level-1 boundary edges (they'd duplicate that information).
 The plot has two facility tiers:
 
 - **Black-bordered stars** mark each level-1 district's *assigned*
-  facility — the candidate selected as the district's minimax facility
-  center. The number next to each star is the district's team count.
+  facility — the candidate selected as the district's demand-weighted
+  1-median. The number next to each star is the district's team count.
 - **Larger diamonds** mark each level-2 superdistrict's assigned
   *super-facility*. Where superdistricts span multiple level-1
   districts, the **thick black edges** outline the super-district
