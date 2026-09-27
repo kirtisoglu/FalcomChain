@@ -365,16 +365,16 @@ first, and $\hat R$ last.
 On the London Ambulance Service instance (a 4,994-node LSOA dual graph
 whose only candidates are the 66 real stations), four chains of 40,000
 steps were run from independent sector-wise initial plans at the locked
-capacity-block calibration. Acceptance is 38--39%, with
+capacity-block calibration. Acceptance is 67--68%, with
 almost every rejection at the supergraph recursion (`chain.rejection_report()`
 counts them by cause). After a burn-in of 8,000 steps the four chains agree on
-the energy (largest pairwise KS distance 0.048, split $\hat R = 1.003$),
-on the number of districts (mean 53, $\hat R = 1.006$) and on the number of
+the energy (largest pairwise KS distance 0.045, split $\hat R = 1.002$),
+on the number of districts (mean 53, $\hat R = 1.004$) and on the number of
 super-districts (mean 22.6, $\hat R = 1.001$); the share of each chain's
 initial boundary still in place falls to the independent-plan level of 0.20
-within about 1,000 steps. The ensemble opens 46--61 of the 66 stations per
-plan, keeps 21 of them in more than 90% of plans, and no level-1 boundary
-edge is cut in more than 47% of plans.
+within 400--720 steps. The ensemble opens 46--61 of the 66 stations per
+plan, keeps 20 of them in more than 90% of plans, and no level-1 boundary
+edge is cut in more than 45% of plans.
 
 ```{figure} _static/las_traces.png
 :alt: London Ambulance real-station chains
