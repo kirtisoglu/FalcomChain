@@ -54,16 +54,18 @@ def hierarchical_recom(
     rule: str = "per_team",
     enforce_global_balance: bool = False,
     max_attempts_base: int = 5000,
-    count_candidates_base: bool = False,
+    count_candidates_base: bool = True,
 ):
     """
     Proposes a new ChainState via two-level hierarchical ReCom.
 
     ``max_attempts_base`` is the spanning-tree retry budget M per base-level
-    extraction; ``count_candidates_base`` switches on the counting predicate
-    (see :class:`falcomchain.tree.tree.CutParams`), useful when the
-    candidate set does not satisfy Assumption 6.1 and the chain runs by
-    rejection.
+    extraction; ``count_candidates_base`` (default ``True``) is the counting
+    predicate of :class:`falcomchain.tree.tree.CutParams`, which keeps the
+    recursion from stranding a candidate-free residual. It is what lets the
+    chain run on sparse, real-world candidate sets without artificial
+    candidates; proposals that still cannot close are rejected and counted
+    in ``MarkovChain.rejections``.
 
     The upper-level (supergraph) partitioning is delegated to
     ``super_partitioner``. The default :func:`resample_super_partition` samples

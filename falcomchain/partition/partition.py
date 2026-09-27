@@ -152,7 +152,7 @@ class Partition:
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
         max_attempts: int = 5000,
-        count_candidates: bool = False,
+        count_candidates: bool = True,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -206,6 +206,7 @@ class Partition:
                 super_assignment, c_min=c_min, rule=rule,
                 enforce_global_balance=enforce_global_balance,
                 psi_fn=psi_fn, super_psi_fn=super_psi_fn,
+                max_attempts=max_attempts, count_candidates=count_candidates,
             )
         partition = cls._from_random_global(
             graph, epsilon, demand_target, capacity_level, density,
@@ -285,7 +286,7 @@ class Partition:
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
         max_attempts: int = 5000,
-        count_candidates: bool = False,
+        count_candidates: bool = True,
     ) -> "Partition":
         total_pop = sum(graph.nodes[n]["demand"] for n in graph)
         n_teams = math.ceil(total_pop / demand_target)
@@ -320,6 +321,8 @@ class Partition:
         enforce_global_balance: bool = False,
         psi_fn: Optional[Callable] = None,
         super_psi_fn: Optional[Callable] = None,
+        max_attempts: int = 5000,
+        count_candidates: bool = True,
     ) -> "Partition":
         """Partition each superdistrict (zone) independently and stitch."""
         # Validate: every node in the graph must have a superdistrict.
@@ -347,10 +350,12 @@ class Partition:
             zone_subgraph = graph.subgraph(zone_nodes)
             zone_pop = sum(graph.nodes[n]["demand"] for n in zone_nodes)
             zone_teams = math.ceil(zone_pop / demand_target)
-            if zone_teams < 1:
+            min_feasible = (1 - epsilon) * c_min * demand_target
+            if zone_teams < 1 or zone_pop < min_feasible:
                 raise ValueError(
-                    f"Superdistrict {zone_id!r} has total demand {zone_pop} < "
-                    f"demand_target {demand_target}; cannot allocate any team."
+                    f"Superdistrict {zone_id!r} has total demand {zone_pop}, below "
+                    f"the minimum {min_feasible:.1f} that one district of capacity "
+                    f"{c_min} needs within tolerance; cannot allocate any team."
                 )
 
             zone_flip = capacitated_recursive_tree(
@@ -365,6 +370,8 @@ class Partition:
                 enforce_global_balance=enforce_global_balance,
                 psi_fn=psi_fn,
                 super_psi_fn=super_psi_fn,
+                max_attempts=max_attempts,
+                count_candidates=count_candidates,
             )
             log_proposal_ratio += zone_flip.log_proposal_ratio
 

@@ -10,6 +10,7 @@ import pytest
 from falcomchain.graph.grid import Grid
 from falcomchain.markovchain.facility import (
     SuperFacilityAssignment,
+    median_super_selector,
     minimax_super_selector,
 )
 from falcomchain.markovchain.state import ChainState
@@ -53,32 +54,44 @@ def _set_super_candidates(partition, nodes):
 
 
 # ---------------------------------------------------------------------------
-# minimax_super_selector
+# median_super_selector (demand-weighted 1-median, paper Section 5.4)
 # ---------------------------------------------------------------------------
 
-class TestMinimaxSuperSelector:
-    def test_picks_node_with_smallest_eccentricity(self):
-        # Three super-candidates, base nodes = {0, 1, 2, 3, 4}, distances
-        # are |i - j|. Optimum is node 2 (radius 2); nodes 0 and 4 have radius 4.
+class TestMedianSuperSelector:
+    def test_picks_demand_weighted_1_median(self):
+        # Base nodes 0..4 on a line with unit demand; distances |i - j|.
+        # Node 2 minimises the total distance (2+1+0+1+2 = 6); 0 and 4 cost 10.
         travel_times = {(i, j): float(abs(i - j)) for i in range(5) for j in range(5)}
-        super_candidates = [0, 2, 4]
-        base_nodes = list(range(5))
-        best, radius = minimax_super_selector(
-            "S0", super_candidates, base_nodes, travel_times
+        demands = {i: 1.0 for i in range(5)}
+        best, cost = median_super_selector(
+            "S0", [0, 2, 4], list(range(5)), demands, travel_times
         )
         assert best == 2
-        assert radius == 2.0
+        assert cost == 6.0
+
+    def test_demand_weights_move_the_median(self):
+        # A heavy node at 0 pulls the 1-median to 0: cost(0) = 10, cost(2) = 24.
+        travel_times = {(i, j): float(abs(i - j)) for i in range(5) for j in range(5)}
+        demands = {0: 10.0, 1: 1.0, 2: 1.0, 3: 1.0, 4: 1.0}
+        best, cost = median_super_selector(
+            "S0", [0, 2, 4], list(range(5)), demands, travel_times
+        )
+        assert best == 0
+        assert cost == 10.0
 
     def test_returns_none_for_empty_candidates(self):
-        best, radius = minimax_super_selector("S0", [], [0, 1], {})
+        best, cost = median_super_selector("S0", [], [0, 1], {}, {})
         assert best is None
-        assert radius == float("inf")
+        assert cost == float("inf")
 
     def test_skips_candidate_with_missing_travel_time(self):
         # Candidate 0 has no entry to node 1; candidate 1 has all entries.
         travel_times = {(0, 0): 0.0, (1, 0): 1.0, (1, 1): 0.0}
-        best, _ = minimax_super_selector("S0", [0, 1], [0, 1], travel_times)
+        best, _ = median_super_selector("S0", [0, 1], [0, 1], {}, travel_times)
         assert best == 1
+
+    def test_minimax_name_is_an_alias(self):
+        assert minimax_super_selector is median_super_selector
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +178,7 @@ class TestSuperFacilityFnOptIn:
 
     def test_custom_selector_propagates(self, manhattan_partition):
         # Custom selector that always returns the smallest-id candidate.
-        def smallest_id_selector(super_id, super_candidates, base_nodes, tt):
+        def smallest_id_selector(super_id, super_candidates, base_nodes, demands, tt):
             ordered = sorted(super_candidates)
             if not ordered:
                 return None, float("inf")

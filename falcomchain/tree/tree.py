@@ -27,7 +27,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 import networkx as nx
-from networkx.algorithms import tree
+# Imported under a private name: a public `tree` here would leak through the
+# package star-imports and shadow the `falcomchain.tree` subpackage attribute,
+# breaking `import falcomchain.tree.tree as ...`.
+from networkx.algorithms import tree as _nx_tree
 
 # Diagnostic side-channel: when enabled, records (recursion_step,
 # debt_value, tau_1) per iteration of capacitated_recursive_tree.
@@ -51,6 +54,7 @@ from falcomchain.tree.errors import (
     BipartitionWarning,
     PopulationBalanceError,
     ReselectException,
+    CutSearchExhausted,
 )
 
 
@@ -372,7 +376,7 @@ def random_spanning_tree(graph: nx.Graph) -> nx.Graph:
         weight = rng.random()
         graph.edges[edge]["random_weight"] = weight
 
-    spanning_tree = tree.minimum_spanning_tree(
+    spanning_tree = _nx_tree.minimum_spanning_tree(
         graph, algorithm="kruskal", weight="random_weight"
     )
     return spanning_tree
@@ -534,16 +538,17 @@ class CutParams:
     # single c¹≥c²_min district could form a super-district on its own.
     # Set to 2 to match the MIP's ``min_l1_per_l2 = 2``.
     min_districts_super: int = 1
-    # Candidate admissibility rule at the base level. ``False`` (default)
-    # only requires >= 1 candidate on each side of a cut. ``True`` adds the
-    # *counting predicate*: the residual side, which still has to be cut
-    # into districts carrying the remaining ``r`` teams, must contain at
-    # least ``ceil(r / capacity_level)`` candidates. This is a necessary
-    # condition for the recursion to close, so it does not change the
-    # feasible state space; it only prunes doomed branches early and raises
-    # the acceptance rate per unit of compute when Assumption 6.1 fails
-    # (e.g. real-station candidate sets).
-    count_candidates: bool = False
+    # Candidate admissibility rule at the base level (paper: the level-1
+    # admissibility predicate fac^1). ``False`` only requires >= 1 candidate
+    # on each side of a cut. ``True`` (default) adds the *counting
+    # predicate*: the residual side, which still has to be cut into
+    # districts carrying the remaining ``r`` teams, must contain at least
+    # ``ceil(r / capacity_level)`` candidates. This is a necessary condition
+    # for the recursion to close, so it does not change the feasible state
+    # space; it prunes doomed branches early and is what makes sparse,
+    # real-world candidate sets (e.g. the 66 London ambulance stations)
+    # workable without artificial candidates.
+    count_candidates: bool = True
 
 
 @dataclass(frozen=True)
@@ -568,8 +573,12 @@ def two_sided_cut(h: SpanningTree, density_check) -> List[Cut]:
 
             if h.has_ideal_demand(assign_team, pop):
                 if node == h.root:
-                    # Root cut: take the entire tree as one district.
-                    # No complement district exists, so psi is just the subtree score.
+                    # Root cut: take the entire residual as one district. It
+                    # closes the recursion, so it must absorb all remaining
+                    # capacity (local coverage rule); otherwise the residual
+                    # would be empty with teams left to allocate.
+                    if assign_team != h.n_teams:
+                        continue
                     psi_subtree = h.psi(node)
                     if psi_subtree > 0:
                         cuts.append(
@@ -624,8 +633,10 @@ def one_sided_cut(h: SpanningTree, density_check):
 
         for assign_team in range(h.c_min, min(h.capacity_level + 1, h.n_teams + 1)):
             if (
-                h.has_ideal_demand(assign_team, pop)
+                node != h.root
+                and h.has_ideal_demand(assign_team, pop)
                 and h.has_facility(node)
+                and h.complement_has_facility(node)
                 and residual_ok(
                     h.tot_candidates - h.graph.nodes[node]["candidate"],
                     h.n_teams - assign_team,
@@ -851,7 +862,7 @@ def bipartition_tree(
     tau_global: Optional[float] = None,
     d_bar_orig: Optional[float] = None,
     min_districts_super: int = 1,
-    count_candidates: bool = False,
+    count_candidates: bool = True,
 ) -> Cut:
     """
     Finds a balanced 2-partition of a graph by drawing a spanning tree and
@@ -883,6 +894,12 @@ def bipartition_tree(
     """
     if tree_sampler is None:
         tree_sampler = uniform_spanning_tree
+
+    if graph.number_of_nodes() == 0:
+        raise CutSearchExhausted(
+            level="super" if supergraph else "base", attempts=0,
+            message="residual graph is empty but capacity remains to be allocated",
+        )
 
     for _attempt_idx in range(max_attempts):
 
@@ -978,8 +995,8 @@ def bipartition_tree(
             f"Selecting a new district pair."
         )
 
-    raise RuntimeError(
-        f"Could not find a possible cut after {max_attempts} attempts. Supergraph = {h.supertree}."
+    raise CutSearchExhausted(
+        level="super" if supergraph else "base", attempts=max_attempts
     )
 
 
@@ -1039,7 +1056,7 @@ def capacitated_recursive_tree(
     rule: str = "per_team",
     enforce_global_balance: bool = False,
     min_districts_super: int = 1,
-    count_candidates: bool = False,
+    count_candidates: bool = True,
 ) -> Flip:
     """
      Recursively partitions a graph into balanced districts using bipartition_tree.
@@ -1197,7 +1214,10 @@ def capacitated_recursive_tree(
         pop = cut_object.demand
 
         if not check_demand(pop / hired_teams):
-            raise PopulationBalanceError()
+            raise PopulationBalanceError(
+                f"extracted district has per-team demand {pop / hired_teams:.1f} "
+                f"outside [{min_demand:.1f}, {max_demand:.1f}]"
+            )
 
         # determine district id
         if assignments == None:  # initial partitioning

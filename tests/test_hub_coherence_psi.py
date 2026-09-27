@@ -1,5 +1,6 @@
 """
-Tests for the level-2 cut score `hub_coherence_psi_factory` (paper Eq. 27).
+Tests for the level-2 cut score `hub_coherence_psi_factory`: the per-capita
+demand-weighted 1-median coordination cost of the paper's level-2 penalty.
 
 Covers:
 - The pure formula (γ=0 case, missing super_candidates, missing facilities).
@@ -32,7 +33,8 @@ def _make_mock_state(*, parts, level1_centers, super_candidates, travel_times):
     for ids in parts.values():
         all_base_nodes |= ids
     for n in all_base_nodes:
-        graph_nodes[n] = {"super_candidate": 1 if n in super_candidates else 0}
+        graph_nodes[n] = {"super_candidate": 1 if n in super_candidates else 0,
+                          "demand": 1.0}
 
     partition = SimpleNamespace(
         parts=parts,
@@ -82,13 +84,12 @@ class TestHubCoherencePsiFactory:
         assert psi(frozenset({"D1"}), 2) == 2.0
         assert psi(frozenset({"D1"}), 3) == 3.0
 
-    def test_minimax_formula(self):
-        # Two districts D1 (center=1), D2 (center=4).
-        # Two super-candidates: 2 (in D1) and 5 (in D2).
-        # Subtree contains both districts.
-        # For super-candidate 2: max(d(2,1), d(2,4)) = max(1, 2) = 2.
-        # For super-candidate 5: max(d(5,1), d(5,4)) = max(4, 1) = 4.
-        # π² = min(2, 4) = 2. With γ=1, teams=2: ψ² = 2 * exp(-2) ≈ 0.270.
+    def test_median_formula(self):
+        # Two districts D1 = {1,2}, D2 = {4,5}; super-candidates 2 and 5;
+        # unit demands and distances |i - j|. The subtree holds both districts.
+        # cost(2) = 1 + 0 + 2 + 3 = 6; cost(5) = 4 + 3 + 1 + 0 = 8.
+        # eta² = min(6, 8) / total demand 4 = 1.5; with γ=1, teams=2:
+        # ψ² = 2 · exp(-1.5).
         state = _make_mock_state(
             parts={"D1": frozenset({1, 2}), "D2": frozenset({4, 5})},
             level1_centers={"D1": 1, "D2": 4},
@@ -97,31 +98,27 @@ class TestHubCoherencePsiFactory:
         )
         psi = hub_coherence_psi_factory(state, gamma=1.0)
         result = psi(frozenset({"D1", "D2"}), 2)
-        assert abs(result - 2.0 * math.exp(-2.0)) < 1e-10
+        assert abs(result - 2.0 * math.exp(-1.5)) < 1e-10
 
     def test_skips_candidate_with_missing_travel_time(self):
         # Two super-candidates; one missing a travel-time entry to a facility.
         state = _make_mock_state(
-            parts={"D1": frozenset({1, 2})},
+            parts={"D1": frozenset({1, 2, 3})},
             level1_centers={"D1": 1},
             super_candidates={2, 3},
-            # No (3, 1) entry
-            travel_times={(1, 1): 0.0, (2, 1): 5.0},
+            # Candidate 2 has a full row; candidate 3 has no entries at all.
+            travel_times={(2, 1): 5.0, (2, 2): 0.0, (2, 3): 1.0},
         )
-        # Add node 3 to the partition graph
-        state.partition.graph.nodes[3] = {"super_candidate": 1}
-        state.partition.parts["D1"] = frozenset({1, 2, 3})
-
         psi = hub_coherence_psi_factory(state, gamma=1.0)
-        # Only super-cand 2 contributes: max(d(2, 1)) = 5. ψ² = 1 * exp(-5).
+        # Only candidate 2 contributes: cost 6 over demand 3 -> eta² = 2.
         result = psi(frozenset({"D1"}), 1)
-        assert abs(result - math.exp(-5.0)) < 1e-10
+        assert abs(result - math.exp(-2.0)) < 1e-10
 
-    def test_returns_zero_when_subtree_has_no_facility(self):
-        # subtree contains a district that has no center entry — defensive case.
+    def test_returns_zero_when_no_candidate_has_complete_travel_times(self):
+        # The only super-candidate lacks a travel time to node 2 -> excluded.
         state = _make_mock_state(
             parts={"D1": frozenset({1, 2})},
-            level1_centers={},  # no level-1 centers computed
+            level1_centers={},
             super_candidates={2},
             travel_times={(2, 1): 1.0},
         )

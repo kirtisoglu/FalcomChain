@@ -140,11 +140,12 @@ class FacilityAssignment:
         return f"<FacilityAssignment [{len(self._centers)} districts]>"
 
 
-def minimax_super_selector(super_id, super_candidates, base_nodes, demands,
-                           travel_times):
+def median_super_selector(super_id, super_candidates, base_nodes, demands,
+                          travel_times):
     """
     Default level-2 facility selector: demand-weighted 1-median over the
-    base-level nodes of the superdistrict.
+    base-level nodes of the superdistrict (paper, Section 5.4, level-2
+    facility rule).
 
     Picks the super-candidate minimising the total demand-weighted travel
     time to every base unit in the superdistrict — the upper-level
@@ -191,6 +192,12 @@ def minimax_super_selector(super_id, super_candidates, base_nodes, demands,
     return best_candidate, best_cost
 
 
+# Backward-compatible alias: the selector was historically called "minimax"
+# although it has implemented the demand-weighted 1-median since the
+# disaggregated-median objective was adopted.
+minimax_super_selector = median_super_selector
+
+
 class SuperFacilityAssignment:
     """
     Computes level-2 (super-) facility centers for each superdistrict.
@@ -199,8 +206,8 @@ class SuperFacilityAssignment:
     F^2 ∩ V(G^1[D^2]) — the super-candidates (``super_candidate=1`` nodes)
     that lie in the base-level subgraph induced by D^2's constituent
     level-1 districts. Selection is delegated to a pluggable callable
-    (see ``selection_fn``); the default is :func:`minimax_super_selector`
-    (Eq. 18).
+    (see ``selection_fn``); the default is :func:`median_super_selector`,
+    the demand-weighted 1-median of the paper's level-2 facility rule.
 
     **Soft constraint at level 2.** If a superdistrict contains no
     super-candidates, no level-2 facility is assigned for it — the entry
@@ -235,12 +242,12 @@ class SuperFacilityAssignment:
             be populated (they are the "spokes" the L2 facility serves).
         :param selection_fn: Callable
             ``(super_id, super_candidates, base_nodes, demands, travel_times) -> (node, cost)``.
-            Defaults to :func:`minimax_super_selector` (demand-weighted
+            Defaults to :func:`median_super_selector` (demand-weighted
             1-median over base nodes).
         """
         sfa = cls()
         if selection_fn is None:
-            selection_fn = minimax_super_selector
+            selection_fn = median_super_selector
 
         travel_times = state.assignment.travel_times
         if travel_times is None:
@@ -304,7 +311,7 @@ class SuperFacilityAssignment:
         """
         sfa = cls()
         if selection_fn is None:
-            selection_fn = minimax_super_selector
+            selection_fn = median_super_selector
 
         partition = state.partition
         travel_times = state.assignment.travel_times

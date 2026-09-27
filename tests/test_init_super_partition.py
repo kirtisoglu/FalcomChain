@@ -7,6 +7,8 @@ RecursivePartitioning to the supergraph to produce a non-trivial level-2
 partition at chain start, instead of the cheap identity grouping.
 """
 
+import math
+
 import pytest
 
 from falcomchain.graph.grid import Grid
@@ -135,6 +137,10 @@ class TestInitSuperPartitionFallback:
         set_seed(42)
         Assignment.travel_times = None
         tiny = Grid(dimensions=(3, 3), num_candidates=2, density="uniform").graph
+        # Seed the recursion on the achievable per-team load (total / k), as
+        # the docs do: 9 nodes x 50 demand = 450 -> k = 3 teams -> 150 per team.
+        total = sum(d["demand"] for _, d in tiny.nodes(data=True))
+        seed_target = total / math.ceil(total / 200)
 
         # The chain may either succeed or fall back. Either is acceptable;
         # the partition must remain valid.
@@ -142,7 +148,7 @@ class TestInitSuperPartitionFallback:
             partition = Partition.from_random_assignment(
                 graph=tiny,
                 epsilon=0.3,
-                demand_target=200,
+                demand_target=seed_target,
                 assignment_class=None,
                 capacity_level=3,
                 init_super_partition=True,

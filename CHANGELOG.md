@@ -4,6 +4,43 @@ All notable changes to FalcomChain are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Counting predicate is the default level-1 admissibility rule**
+  (`count_candidates=True` in `CutParams`, `bipartition_tree`,
+  `capacitated_recursive_tree`, `hierarchical_recom(count_candidates_base=True)`
+  and `Partition.from_random_assignment`). The residual of every extraction
+  must keep at least `ceil(remaining_teams / c_max)` candidates, and a
+  one-sided cut must leave a candidate on both sides. This is what lets the
+  chain run on sparse, real-world candidate sets (e.g. the 66 London
+  ambulance stations) without artificial candidates; `repair_facility_density`
+  remains available as an optional initialization aid.
+- **Rejection accounting.** `MarkovChain` records why proposals were
+  rejected (`chain.rejections`, `chain.last_rejection`,
+  `chain.rejection_report()`, `classify_rejection`). Proposal-internal
+  failures derive from `ProposalRejected` (a `RuntimeError`):
+  `CutSearchExhausted(level, attempts)` when the retry budget runs out at the
+  base or supergraph level, and `PopulationBalanceError`, which used to
+  crash the chain.
+- The level-2 facility selector is named for what it computes:
+  `median_super_selector` (demand-weighted 1-median). `minimax_super_selector`
+  is kept as an alias.
+
+### Fixed
+- In two-sided mode the root cut could extract the whole residual with fewer
+  teams than remained, leaving an empty residual (surfaced as `IndexError`
+  on the next draw). The root cut now has to absorb all remaining capacity,
+  one-sided mode never extracts the root subtree, and an empty residual is a
+  rejected proposal.
+- `import falcomchain.tree.tree as ...` failed because the package
+  star-imports leaked a `tree` name that shadowed the subpackage.
+- `compute_energy` accepts states without a `super_facility` attribute.
+- Zone-based initialization raises a clear `ValueError` when a zone's demand
+  is below what one district of minimum capacity needs within tolerance.
+- Test suite repaired (253 passing); CI now runs the whole suite. Two
+  scaffold test files that never parsed were removed.
+
 ## [0.1.0] — TBD
 
 Initial public release. See the FalCom paper (Kaul & Kırtışoğlu, 2026) for
