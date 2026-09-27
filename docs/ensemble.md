@@ -259,16 +259,54 @@ A high frequency on an *artificial* candidate is informative — it means
 the chain wants a facility there — but should not be presented as
 "essential" without that context.
 
-## Convergence diagnostics with FalcomPlot
+## Convergence diagnostics
 
 The ensemble statistics above are only meaningful once the chain has
-reached its stationary regime. Because tight mixing-time bounds are not
-known for recombination-style chains, convergence is assessed
-*empirically* from several independently seeded chains, using two
-diagnostics that `falcomplot` computes directly: the Gelman--Rubin
-potential scale reduction factor $\hat R$ (do the chains agree?) and the
-effective sample size (how many independent draws does a correlated run
-provide?).
+reached its stationary regime. No closed-form stationary distribution is
+known for recombination-style chains, FalCom included, so convergence is
+assessed *empirically*, in the order the FalCom paper uses:
+
+1. **Exact enumeration** on an instance small enough to list every
+   feasible state: does the chain visit only feasible states, all of
+   them, and with the same frequencies from very different starts?
+2. **Start-independence on large instances**: do independently started
+   chains agree on the distributions of summary statistics
+   (Kolmogorov--Smirnov distance), and how fast does each chain forget
+   its initial plan (share of the initial boundary edges still cut)?
+3. **Gelman--Rubin $\hat R$ and effective sample size** as secondary
+   numbers, computed by `falcomplot`.
+
+### Exact enumeration on a 3x4 grid
+
+The validation instance in the paper (and in the
+[London-Ambulance-Service-System](https://github.com/kirtisoglu/London-Ambulance-Service-System)
+repo, `falcomchain_experiments/validation/enumeration.py`) is a 3x4
+grid of twelve units with demand 100, four candidate sites, `w = 300`,
+`epsilon = 0.15`, `c1 in {1, 2}`, `c2 in [2, 4]` and `kappa = 2`, which
+has 93 feasible level-1 partitions and 119 joint states. Three chains
+of 200,000 steps from the first, middle and last partition visit all of
+them and nothing else; the total-variation distance between any two
+chains' empirical laws is at most 0.012, and between the two halves of
+one chain at most 0.016.
+
+```{figure} _static/fig_enumeration_3x4.png
+:alt: exact enumeration validation
+:width: 100%
+
+(a) Sampled frequency of each feasible level-1 state against the
+spanning-tree law; (b) probability mass by district-size pattern under
+the sampled, uniform and spanning-tree laws.
+```
+
+The sampled law is neither uniform (total-variation distance 0.40) nor
+the spanning-tree law (0.37). Across district-size patterns it spreads
+its mass almost like the uniform law; within a pattern the frequencies
+track the spanning-tree weights (log-log correlation 0.94), the same
+compactness preference ReCom has. The spanning-tree law conditioned on
+the pattern is within 0.11 of the sampled law. Read the ensemble
+statistics of this page as readouts of *that* law.
+
+### Start-independence with FalcomPlot
 
 Record a scalar summary along each chain — here the number of cut
 (boundary) edges, though the energy or a district count works just as
@@ -317,43 +355,45 @@ fig = fp.plot_convergence(
 
 A single-chain trace is drawn with `fp.plot_trace`, and a
 boundary-frequency map over a real dual graph with
-`fp.plot_boundary_frequency`, exactly as above.
+`fp.plot_boundary_frequency`, exactly as above. Chains that agree on
+their summary statistics can still share a region they never leave;
+that is why the enumeration check above and the forgetting curves come
+first, and $\hat R$ last.
 
 ### In the FalCom paper: the London Ambulance Service ensemble
 
-These are the diagnostics behind the case study in the FalCom paper. On
-the London Ambulance Service instance (a 4,994-node LSOA dual graph with
-66 stations across 5 sectors), four independently seeded chains of
-10,000 steps were run at the locked capacity-block calibration.
-`fp.plot_convergence` on the access-cost trace gives
-$\hat R \approx 1.00$, and the four chains' post-burn-in energy
-distributions coincide:
+On the London Ambulance Service instance (a 4,994-node LSOA dual graph
+whose only candidates are the 66 real stations), four chains of 40,000
+steps were run from independent sector-wise initial plans at the locked
+capacity-block calibration. Acceptance is 38--39%, with
+almost every rejection at the supergraph recursion (`chain.rejection_report()`
+counts them by cause). After a burn-in of 8,000 steps the four chains agree on
+the energy (largest pairwise KS distance 0.048, split $\hat R = 1.003$),
+on the number of districts (mean 53, $\hat R = 1.006$) and on the number of
+super-districts (mean 22.6, $\hat R = 1.001$); the share of each chain's
+initial boundary still in place falls to the independent-plan level of 0.20
+within about 1,000 steps. The ensemble opens 46--61 of the 66 stations per
+plan, keeps 21 of them in more than 90% of plans, and no level-1 boundary
+edge is cut in more than 47% of plans.
 
-```{figure} _static/las_convergence.png
-:alt: London Ambulance convergence
+```{figure} _static/las_traces.png
+:alt: London Ambulance real-station chains
 :width: 100%
 
-Energy traces of four London Ambulance chains (left, burn-in shaded) and
-their post-burn-in distributions (right), rendered by
-`fp.plot_convergence`. The split Gelman--Rubin statistic is
-$\hat R \approx 1.00$.
+Energy, district-count and cut-edge traces of the four real-station
+chains (left, burn-in shaded) and their post-burn-in distributions
+(right).
 ```
-
-Aggregating the post-burn-in snapshots into a boundary-frequency map with
-`fp.plot_boundary_frequency` shows which service-zone boundaries the
-ensemble fixes and which stay contested:
 
 ```{figure} _static/las_boundary_freq.png
 :alt: London Ambulance boundary frequency
 :width: 100%
 
 Level-1 district and level-2 super-district boundary frequencies across
-the London Ambulance ensemble, rendered by `fp.plot_boundary_frequency`.
+the real-station ensemble.
 ```
 
-The current operational layout lands within 4.6% of the best
-matched-count configuration the search found. See the FalCom paper for
-the full setup and metrics.
+See the FalCom paper for the full setup and metrics.
 
 ## API reference
 

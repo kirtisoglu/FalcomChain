@@ -20,8 +20,8 @@ adheres to [Semantic Versioning](https://semver.org/).
   scaled one; on the London instance initialization failed under the scaled
   rule). `tests/test_debt_rule.py` verifies containment, the debt-evolution
   interval, the `|delta| <= tau` invariant and telescoping on the instrumented
-  recursion. The paper's Section 5.3 and Appendix A are to be rewritten to the
-  absolute rule.
+  recursion. The paper's Section 5.3 and Appendix A describe this absolute
+  rule.
 - **Cut selection is uniform over admissible cuts at `gamma = 0`** at both
   levels, as the paper describes. Previously level-1 cuts were weighted by
   the number of candidates in the subtree (and by the product of both
@@ -57,6 +57,10 @@ adheres to [Semantic Versioning](https://semver.org/).
   does not contain; level-2 facilities are described as the 1-median;
   Assumption 6.1 is presented as a sufficient condition and candidate repair
   as an optional initialization aid.
+- Docs: the ensemble page's convergence section now follows the paper's
+  validation program (exact enumeration on a 3x4 grid, start-independence
+  of independently started chains, forgetting curves; Gelman--Rubin and ESS
+  as secondary numbers) and shows the real-station London chains.
 
 ### Fixed
 - The kappa constraint (each super-district holds at least

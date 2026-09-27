@@ -122,7 +122,7 @@ For optimization variants (find a low-energy plan), use the
 is a heuristic optimizer, not a true Metropolis-Hastings sampler — it
 omits the proposal-density ratio because that ratio is intractable for
 FalCom (the standard ReCom MH formulation requires the
-[Cannon et al. 2022 reversibility correction](https://arxiv.org/abs/2008.08054),
+[RevReCom correction of Cannon et al. (SIAM Review, 2026)](https://arxiv.org/abs/2008.08054),
 which we have not implemented).
 
 ## Initial state
