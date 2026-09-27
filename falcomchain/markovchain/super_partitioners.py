@@ -44,6 +44,7 @@ def resample_super_partition(
     gamma_super: float = 0.0,
     max_attempts: int = 1000,
     min_districts_super: int = 1,
+    check_super_residual: bool = True,
 ) -> Tuple[Flip, frozenset, int, float, float]:
     """
     Default super-partitioner: resample the level-2 partition each step.
@@ -97,6 +98,7 @@ def resample_super_partition(
         super_psi_fn=super_psi_fn,
         max_attempts=max_attempts,
         min_districts_super=min_districts_super,
+        check_super_residual=check_super_residual,
     )
     log_super_ratio = super_flip.log_proposal_ratio
 
@@ -127,6 +129,7 @@ def fixed_super_partition(
     gamma_super: float = 0.0,
     max_attempts: int = 1000,
     min_districts_super: int = 1,
+    check_super_residual: bool = True,
 ) -> Tuple[Flip, frozenset, int, float, float]:
     """
     Fixed-superdistrict partitioner: never resamples the level-2 partition.
@@ -148,7 +151,7 @@ def fixed_super_partition(
     :returns: ``(super_flip, merge, super_teams, super_demand, log_super_ratio=0.0)``
     """
     del epsilon_super, c_min_super, c_max_super
-    del super_psi_fn, gamma_super, max_attempts, min_districts_super  # unused — fixed mode
+    del super_psi_fn, gamma_super, max_attempts, min_districts_super, check_super_residual  # unused — fixed mode
     partition = state.partition
     super_parts = partition.super_parts
     if not super_parts:

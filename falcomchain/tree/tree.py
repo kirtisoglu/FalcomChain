@@ -562,6 +562,17 @@ class CutParams:
     # real-world candidate sets (e.g. the 66 London ambulance stations)
     # workable without artificial candidates.
     count_candidates: bool = True
+    # Residual-feasibility predicate at the supergraph level (the level-2
+    # analogue of the counting predicate). In one-sided mode a super-cut is
+    # admissible only if the supernodes it leaves behind can still be
+    # partitioned into super-districts of capacity in [c_min, c_max] holding
+    # at least ``min_districts_super`` districts each: with residual capacity
+    # ``c`` and ``n`` residual supernodes, some number ``k`` of super-districts
+    # must satisfy ceil(c / c_max) <= k <= min(floor(c / c_min),
+    # floor(n / min_districts_super)). A necessary condition, so the feasible
+    # state space is unchanged; it stops the greedy extraction from stranding
+    # a final supernode, which was the dominant rejection cause.
+    check_super_residual: bool = True
 
 
 @dataclass(frozen=True)
@@ -742,6 +753,19 @@ def find_superedge_cuts(
     # the number of supergraph nodes in it.
     min_d = h.params.min_districts_super
     n_super_nodes = len(nodes)
+    check_residual = h.params.check_super_residual
+
+    def residual_ok(c_res: int, n_res: int) -> bool:
+        """Can ``n_res`` supernodes carrying ``c_res`` capacity units still be
+        cut into super-districts with capacity in [c_min, c_max] and at least
+        ``min_d`` districts each? (Necessary conditions; see CutParams.)"""
+        if not check_residual:
+            return True
+        if c_res <= 0:
+            return n_res == 0
+        k_lo = -(-c_res // h.capacity_level)
+        k_hi = min(c_res // c_min, n_res // min_d) if min_d > 0 else c_res // c_min
+        return k_lo <= k_hi
 
     for node in nodes:
         teams = nodes[node]["n_teams"]
@@ -786,9 +810,13 @@ def find_superedge_cuts(
             subtree_set = _part_nodes(h.successors, node)
             leaf_count = len(subtree_set)
             complement_count = n_super_nodes - leaf_count
-            if (c_min <= teams <= h.capacity_level) and abs(
-                pop - teams * h.ideal_demand
-            ) <= h.ideal_demand * teams * h.epsilon and leaf_count >= min_d:
+            if (
+                (c_min <= teams <= h.capacity_level)
+                and abs(pop - teams * h.ideal_demand)
+                <= h.ideal_demand * teams * h.epsilon
+                and leaf_count >= min_d
+                and residual_ok(h.n_teams - teams, complement_count)
+            ):
                 subnodes = frozenset(subtree_set)
                 psi = (
                     super_psi_fn(subnodes, teams)
@@ -817,6 +845,7 @@ def find_superedge_cuts(
                         complement_pop - complement_teams * h.ideal_demand
                     ) <= h.ideal_demand * complement_teams * h.epsilon
                     and complement_count >= min_d
+                    and residual_ok(teams, leaf_count)
                 ):
                     subnodes = frozenset(
                         set(nodes) - subtree_set
@@ -865,6 +894,7 @@ def bipartition_tree(
     d_bar_orig: Optional[float] = None,
     min_districts_super: int = 1,
     count_candidates: bool = True,
+    check_super_residual: bool = True,
 ) -> Cut:
     """
     Finds a balanced 2-partition of a graph by drawing a spanning tree and
@@ -925,6 +955,7 @@ def bipartition_tree(
                 debt=debt,
                 min_districts_super=min_districts_super,
                 count_candidates=count_candidates,
+                check_super_residual=check_super_residual,
             ),
             supergraph=supergraph,
         )
@@ -1059,6 +1090,7 @@ def capacitated_recursive_tree(
     enforce_global_balance: bool = False,
     min_districts_super: int = 1,
     count_candidates: bool = True,
+    check_super_residual: bool = True,
 ) -> Flip:
     """
      Recursively partitions a graph into balanced districts using bipartition_tree.
@@ -1205,6 +1237,7 @@ def capacitated_recursive_tree(
                             if (enforce_global_balance and not supergraph) else None,
                 min_districts_super=min_districts_super if supergraph else 1,
                 count_candidates=count_candidates and not supergraph,
+                check_super_residual=check_super_residual and supergraph,
             )
 
         except Exception:

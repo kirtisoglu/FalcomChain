@@ -56,6 +56,7 @@ def hierarchical_recom(
     enforce_global_balance: bool = False,
     max_attempts_base: int = 5000,
     count_candidates_base: bool = True,
+    check_super_residual: bool = True,
 ):
     """
     Proposes a new ChainState via two-level hierarchical ReCom.
@@ -66,7 +67,11 @@ def hierarchical_recom(
     recursion from stranding a candidate-free residual. It is what lets the
     chain run on sparse, real-world candidate sets without artificial
     candidates; proposals that still cannot close are rejected and counted
-    in ``MarkovChain.rejections``.
+    in ``MarkovChain.rejections``. ``check_super_residual`` (default ``True``)
+    is the level-2 analogue: a one-sided supergraph extraction is admissible
+    only if the supernodes it leaves behind can still be partitioned into
+    super-districts, which removes the stranded-supernode rejections that
+    dominated without it.
 
     The upper-level (supergraph) partitioning is delegated to
     ``super_partitioner``. The default :func:`resample_super_partition` samples
@@ -160,6 +165,7 @@ def hierarchical_recom(
             gamma_super=gamma_super,
             max_attempts=max_attempts_super,
             min_districts_super=min_districts_super,
+            check_super_residual=check_super_residual,
         )
     )
 

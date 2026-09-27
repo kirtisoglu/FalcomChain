@@ -100,6 +100,14 @@ demand-weighted total travel time to the district's units (the
 demand-weighted 1-median). The same rule is applied one level up for the
 level-2 facility of each superdistrict.
 
+At the supergraph level the analogous check is the *residual-feasibility
+predicate*: a one-sided level-2 extraction is admissible only if the
+supernodes it leaves behind can still form super-districts with capacity in
+`[c2_min, c2_max]` and at least `min_districts_super` districts each. Both
+predicates are necessary conditions, so neither changes the feasible state
+space; they keep the recursion from spending its retry budget on residuals
+that cannot close.
+
 ## Convergence
 
 No mixing-time or stationary-distribution result is known for FalCom, as

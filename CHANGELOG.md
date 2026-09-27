@@ -37,6 +37,19 @@ adheres to [Semantic Versioning](https://semver.org/).
   chain run on sparse, real-world candidate sets (e.g. the 66 London
   ambulance stations) without artificial candidates; `repair_facility_density`
   remains available as an optional initialization aid.
+- **Residual-feasibility predicate at the supergraph**
+  (`check_super_residual=True` in `CutParams`, `bipartition_tree`,
+  `capacitated_recursive_tree`, `resample_super_partition` and
+  `hierarchical_recom`). A one-sided level-2 extraction is admissible only if
+  the supernodes it leaves behind can still be cut into super-districts with
+  capacity in `[c2_min, c2_max]` holding at least `min_districts_super`
+  districts each (`ceil(c/c_max) <= k <= min(floor(c/c_min), floor(n/kappa))`
+  for some number `k` of super-districts). A necessary condition, so the
+  feasible state space is unchanged; it removes the stranded-supernode
+  rejections that dominated before: on the London real-station instance the
+  acceptance rate rises from 38% to 68%, on the synthetic grids from about
+  60% to over 90%, and steps get cheaper because the recursion no longer
+  spends its retry budget on doomed residuals. `tests/test_super_residual.py`.
 - **Rejection accounting.** `MarkovChain` records why proposals were
   rejected (`chain.rejections`, `chain.last_rejection`,
   `chain.rejection_report()`, `classify_rejection`). Proposal-internal
