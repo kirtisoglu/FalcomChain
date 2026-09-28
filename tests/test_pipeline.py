@@ -655,8 +655,8 @@ class TestPsiScore:
         for n in G.nodes:
             assert h.psi(n) == 0.0
 
-    def test_psi_equals_phi_when_gamma_zero(self):
-        """When gamma=0, psi should equal the candidate count (phi)."""
+    def test_psi_is_uniform_when_gamma_zero(self):
+        """When gamma=0, every admissible subtree scores 1 (uniform cut selection)."""
         G = nx.path_graph(5)
         for n in G.nodes:
             G.nodes[n]["demand"] = 10
@@ -666,8 +666,9 @@ class TestPsiScore:
             ideal_demand=10, epsilon=0.5, capacity_level=1, n_teams=5, gamma=0.0,
         )
         h = SpanningTree(graph=G, params=params)
-        # Root's accumulated candidate count = total candidates = 3
-        assert h.psi(h.root) == float(h.graph.nodes[h.root]["candidate"])
+        assert h.graph.nodes[h.root]["candidate"] == 3   # root holds all candidates
+        assert h.psi(h.root) == 1.0
+        assert all(h.psi(n) in (0.0, 1.0) for n in G.nodes)
 
     def test_psi_with_custom_fn(self):
         """Custom psi_fn should be called instead of default."""

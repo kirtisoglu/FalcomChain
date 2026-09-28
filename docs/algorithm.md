@@ -81,29 +81,44 @@ so the final district falls within tolerance.
 
 For a residual graph H:
 1. Sample a uniform spanning tree T of H (Wilson's algorithm)
-2. For every node u in T, compute the **feasibility score** φ(u): is the
-   subtree rooted at u demand-balanced AND containing a facility candidate?
-3. Compute the **candidate-awareness score** ψ(u) = φ(u) · exp(-γ · r(u))
-   where r(u) is the demand radius (eccentricity of the best candidate)
-4. Select a cut edge with probability proportional to ψ
+2. For every node u in T, decide whether the subtree rooted at u is
+   **admissible**: its demand fits the debt-corrected window of some
+   capacity, it contains a facility candidate, and the residual it leaves
+   keeps enough candidates for the districts still to be cut (the
+   *counting predicate*, at least `ceil(remaining teams / c_max)`)
+3. Score every admissible subtree with ψ(u) = exp(-γ · η(u)), where η(u)
+   is the per-capita access cost of the best-located candidate
+   (demand-weighted 1-median); at γ = 0 every admissible subtree scores 1
+4. Select a subtree with probability proportional to ψ — uniformly over
+   admissible cuts at γ = 0
 5. The selected subtree becomes the next extracted district
 
 ### Phase 4: Facility Assignment
 
 Deterministic: for each district, pick the candidate that minimizes the
-maximum travel time to any node in the district (minimax / covering radius).
+demand-weighted total travel time to the district's units (the
+demand-weighted 1-median). The same rule is applied one level up for the
+level-2 facility of each superdistrict.
+
+At the supergraph level the analogous check is the *residual-feasibility
+predicate*: a one-sided level-2 extraction is admissible only if the
+supernodes it leaves behind can still form super-districts with capacity in
+`[c2_min, c2_max]` and at least `min_districts_super` districts each. Both
+predicates are necessary conditions, so neither changes the feasible state
+space; they keep the recursion from spending its retry budget on residuals
+that cannot close.
 
 ## Convergence
 
-FalCom is irreducible and aperiodic over the feasible state space, so it
-converges to a unique stationary distribution π* (paper Theorem 6.3 and
-Corollary 6.5). The distribution is shaped by:
-
-- The **uniform spanning tree distribution** on each merged region
-- The **candidate-awareness score** ψ (controlled by γ)
-
-When γ = 0, ψ reduces to the feasibility count φ, and cut selection becomes
-uniform over admissible cuts.
+No mixing-time or stationary-distribution result is known for FalCom, as
+for the recombination chains it extends. The chain is validated
+empirically, the way the redistricting literature does: exact enumeration
+of all feasible states on small instances (support and start-independence
+of the empirical distribution), and comparison of summary-statistic
+distributions across chains started from very different plans. The
+sampled distribution is shaped by the uniform spanning-tree distribution
+on each re-cut region and by the candidate-awareness score ψ (controlled
+by γ); at γ = 0 cut selection is uniform over admissible cuts.
 
 ## Acceptance
 
@@ -115,14 +130,17 @@ For optimization variants (find a low-energy plan), use the
 is a heuristic optimizer, not a true Metropolis-Hastings sampler — it
 omits the proposal-density ratio because that ratio is intractable for
 FalCom (the standard ReCom MH formulation requires the
-[Cannon et al. 2022 reversibility correction](https://arxiv.org/abs/2008.08054),
+[RevReCom correction of Cannon et al. (SIAM Review, 2026)](https://arxiv.org/abs/2008.08054),
 which we have not implemented).
 
 ## Initial state
 
-The initial partition is constructed by applying Phase 2 directly to the
-full base graph. This produces a feasible state in O(|V|) time, so the chain
-can begin sampling immediately without burn-in.
+The initial partition is constructed by applying Phase 2 to the base graph,
+either globally or zone by zone (`super_assignment=`), each zone against its
+own per-team target. On large instances with few candidates the zone-by-zone
+form is both faster and far more likely to close; the first accepted step
+replaces the zone grouping by a sampled level-2 partition. The chain still
+needs a burn-in before its samples are used.
 
 ## Where to next
 

@@ -21,8 +21,9 @@ road networks, or with a two-line fallback for prototyping.
 
 Travel times drive two things in FalcomChain:
 
-1. **Facility assignment** — the minimax facility center of each district
-   (Eq. 17) is the candidate minimizing the worst travel time to any node.
+1. **Facility assignment** — the facility of each district is the candidate
+   minimizing the demand-weighted total travel time to the district's units
+   (demand-weighted 1-median).
 2. **The optional energy objective** — `compute_energy` is demand-weighted
    travel time (see [Optimization Methods](optimization_methods.md)).
 

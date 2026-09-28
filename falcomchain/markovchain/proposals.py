@@ -6,6 +6,7 @@ from typing import Callable, Optional, Tuple
 from falcomchain.random import rng
 
 from falcomchain.partition import Partition
+from falcomchain.tree.errors import SuperDistrictTooSmall
 from falcomchain.tree.tree import (
     Cut,
     Flip,
@@ -54,16 +55,23 @@ def hierarchical_recom(
     rule: str = "per_team",
     enforce_global_balance: bool = False,
     max_attempts_base: int = 5000,
-    count_candidates_base: bool = False,
+    count_candidates_base: bool = True,
+    check_super_residual: bool = True,
 ):
     """
     Proposes a new ChainState via two-level hierarchical ReCom.
 
     ``max_attempts_base`` is the spanning-tree retry budget M per base-level
-    extraction; ``count_candidates_base`` switches on the counting predicate
-    (see :class:`falcomchain.tree.tree.CutParams`), useful when the
-    candidate set does not satisfy Assumption 6.1 and the chain runs by
-    rejection.
+    extraction; ``count_candidates_base`` (default ``True``) is the counting
+    predicate of :class:`falcomchain.tree.tree.CutParams`, which keeps the
+    recursion from stranding a candidate-free residual. It is what lets the
+    chain run on sparse, real-world candidate sets without artificial
+    candidates; proposals that still cannot close are rejected and counted
+    in ``MarkovChain.rejections``. ``check_super_residual`` (default ``True``)
+    is the level-2 analogue: a one-sided supergraph extraction is admissible
+    only if the supernodes it leaves behind can still be partitioned into
+    super-districts, which removes the stranded-supernode rejections that
+    dominated without it.
 
     The upper-level (supergraph) partitioning is delegated to
     ``super_partitioner``. The default :func:`resample_super_partition` samples
@@ -157,6 +165,7 @@ def hierarchical_recom(
             gamma_super=gamma_super,
             max_attempts=max_attempts_super,
             min_districts_super=min_districts_super,
+            check_super_residual=check_super_residual,
         )
     )
 
@@ -207,6 +216,18 @@ def hierarchical_recom(
         iteration=partition.step,
     )
     flip = flip.add_merged_ids(merge)
+
+    # The kappa constraint (every super-district bundles at least
+    # ``min_districts_super`` districts) is enforced at the supergraph cut;
+    # the base-level re-cut can still merge a super-district's districts
+    # into fewer than kappa (e.g. two unit-capacity districts into one of
+    # capacity 2), which the paper's formulation forbids. Reject such
+    # proposals so every sampled state satisfies the constraint.
+    if min_districts_super > 1 and len(flip.new_ids) < min_districts_super:
+        raise SuperDistrictTooSmall(
+            f"lower-level re-partition produced {len(flip.new_ids)} district(s) "
+            f"in a super-district that must hold at least {min_districts_super}"
+        )
 
     # Pure Boltzmann acceptance: ignore forward proposal density since we
     # don't compute the reverse term (see GerryChain, Cannon et al. 2022).

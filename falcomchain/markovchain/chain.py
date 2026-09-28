@@ -24,12 +24,43 @@ Dependencies:
 Last Updated: 11 Jan 2024
 """
 
+from collections import Counter
 from typing import Callable, Iterable, Optional, Union
 
 from falcomchain.constraints import Bounds, Validator
 from falcomchain.partition import Partition
+from falcomchain.tree.errors import (
+    CutSearchExhausted,
+    PopulationBalanceError,
+    SuperDistrictTooSmall,
+)
 
 from .state import ChainState
+
+
+def classify_rejection(exc: BaseException) -> str:
+    """
+    Map a proposal-internal exception to a rejection-cause label.
+
+    Labels:
+
+    - ``"cut_search_exhausted:base"``  -- the level-1 recursion found no
+      admissible cut within its retry budget (typically a stranded
+      candidate-free or under-provisioned residual);
+    - ``"cut_search_exhausted:super"`` -- the supergraph recursion stranded a
+      final supernode against the discrete capacity constraints;
+    - ``"super_district_below_kappa"`` -- the base-level re-cut left the
+      selected super-district with fewer than ``min_districts_super`` districts;
+    - ``"balance_violation"``          -- the safety-net per-team check failed;
+    - ``"runtime_error"``              -- any other ``RuntimeError``.
+    """
+    if isinstance(exc, CutSearchExhausted):
+        return f"cut_search_exhausted:{exc.level}"
+    if isinstance(exc, SuperDistrictTooSmall):
+        return "super_district_below_kappa"
+    if isinstance(exc, PopulationBalanceError):
+        return "balance_violation"
+    return "runtime_error"
 
 
 class MarkovChain:
@@ -113,6 +144,10 @@ class MarkovChain:
         self.state = initial_state
         self.recorder = recorder
         self.callbacks = callbacks or []
+        # Rejection accounting: cause label -> count (see classify_rejection),
+        # plus the label of the most recent rejection (None after an accept).
+        self.rejections = Counter()
+        self.last_rejection = None
 
         # Attach recorder to state so proposal functions can access it
         if recorder is not None:
@@ -176,6 +211,8 @@ class MarkovChain:
         """
         self.counter = 0
         self.state = self.initial_state
+        self.rejections = Counter()
+        self.last_rejection = None
         return self
 
     def __next__(self) -> Optional[ChainState]:
@@ -211,14 +248,19 @@ class MarkovChain:
             # also fail validity / acceptance checks; same outcome.
             try:
                 proposed_next_state = self.proposal(self.state)
-            except RuntimeError:
+            except RuntimeError as exc:
                 proposed_next_state = None
+                self._record_rejection(classify_rejection(exc))
 
             if proposed_next_state is not None:
-                if self.is_valid(proposed_next_state.partition):
-                    if self.accept(proposed_next_state, self.state):
-                        self.state = proposed_next_state
-                        accepted = True
+                if not self.is_valid(proposed_next_state.partition):
+                    self._record_rejection("constraint_failed")
+                elif self.accept(proposed_next_state, self.state):
+                    self.state = proposed_next_state
+                    accepted = True
+                    self.last_rejection = None
+                else:
+                    self._record_rejection("not_accepted")
 
             if self.recorder is not None:
                 self.recorder.record_step(
@@ -235,6 +277,31 @@ class MarkovChain:
         if self.recorder is not None:
             self.recorder.close()
         raise StopIteration
+
+    def _record_rejection(self, cause: str) -> None:
+        self.rejections[cause] += 1
+        self.last_rejection = cause
+
+    def rejection_report(self) -> dict:
+        """
+        Summarize why proposals were rejected so far.
+
+        :returns: ``{"steps": n, "accepted": a, "rejected": r,
+            "acceptance_rate": a / n, "causes": {label: count}}`` where
+            ``steps`` counts proposal attempts made so far (the initial
+            state is not an attempt).
+        :rtype: dict
+        """
+        steps = max(0, getattr(self, "counter", 1) - 1)
+        rejected = sum(self.rejections.values())
+        accepted = steps - rejected
+        return {
+            "steps": steps,
+            "accepted": accepted,
+            "rejected": rejected,
+            "acceptance_rate": (accepted / steps) if steps else float("nan"),
+            "causes": dict(self.rejections),
+        }
 
     def __len__(self) -> int:
         """

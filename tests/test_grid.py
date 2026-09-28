@@ -67,10 +67,10 @@ def test_grid():
     assert all(graph.nodes[node]["area"] == 1 for node in graph.nodes)
 
     assert {
-        node for node in graph.nodes if graph.nodes[node]["population"] == 70
+        node for node in graph.nodes if graph.nodes[node]["demand"] == 70
     } == nodes_with_pop_70
     assert {
-        node for node in graph.nodes if graph.nodes[node]["population"] == 30
+        node for node in graph.nodes if graph.nodes[node]["demand"] == 30
     } == nodes_with_pop_30
     assert all(graph.nodes[node]["C_X"] == node[0] for node in graph.nodes)
     assert all(graph.nodes[node]["C_Y"] == node[1] for node in graph.nodes)

@@ -39,7 +39,7 @@ def compute_energy(state: ChainState) -> float:
             total += demand * travel_times[(center, node)]
 
     # ---- upper-level coordination term ----
-    sf = state.super_facility
+    sf = getattr(state, "super_facility", None)
     if sf is not None:
         super_centers = sf.centers
         super_parts = state.partition.super_parts  # super_id -> L1 district IDs

@@ -69,9 +69,9 @@ not on separate sites:
 | [Algorithm overview](docs/algorithm.md)               | What FalCom does, conceptually                                   |
 | [GeoDataFrame guide](docs/geodataframe.md)            | Building graphs from shapefiles/GeoJSON                          |
 | [Travel times](docs/travel_times.md)                  | Travel-time matrices with FalcomTravel                           |
-| [Candidate feasibility](docs/feasibility.md)          | Verify Assumption 6.1 and add artificial candidates              |
+| [Candidate feasibility](docs/feasibility.md)          | Assumption 6.1 as a sufficient condition; optional candidate repair |
 | [Running a chain](docs/running_a_chain.md)            | Every knob of a chain run, end to end                            |
-| [Level-2 facilities](docs/super_facility.md)          | Opt-in super-facility assignment (Eq. 18) with pluggable selector |
+| [Level-2 facilities](docs/super_facility.md)          | Opt-in super-facility assignment (1-median) with pluggable selector |
 | [Optimization methods](docs/optimization_methods.md)  | Boltzmann acceptance, annealing, custom objectives               |
 | [Ensemble analysis](docs/ensemble.md)                 | Boundary, facility, and capacity statistics across MCMC samples  |
 | [Visualization](docs/visualization.md)                | Every FalcomPlot helper in one tour                              |

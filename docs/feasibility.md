@@ -14,16 +14,23 @@ kernelspec:
 
 ```{admonition} Goal of this page
 :class: tip
-Verify that your candidate set satisfies Assumption 6.1 before running
-a chain, and repair it with artificial candidates when it does not —
-including how to choose among the six placement strategies.
+Check how far your candidate set is from Assumption 6.1, and — when you
+want an initial partition on a very sparse set without the counting
+predicate — repair it with artificial candidates, choosing among the six
+placement strategies.
 ```
 
-The FalCom chain converges to a unique stationary distribution only
-when the candidate set is dense enough that no facility-free region of
-the graph can form a valid district on its own. This page shows how to
-verify the condition (Assumption 6.1 in the paper) and how to add
-artificial candidates if it fails.
+Assumption 6.1 is a *sufficient* condition: when the candidate set is so
+dense that no facility-free region of the graph can form a valid district
+on its own, no proposal is ever rejected for lack of a candidate. It is
+**not** required for the chain to run. With the counting predicate (the
+default level-1 admissibility rule) the recursion refuses cuts that would
+strand a candidate-free residual, so sparse real-world candidate sets work
+directly — the 66 London ambulance stations on a 4,994-unit graph, for
+example — at the price of a higher rejection rate that the chain reports
+(`MarkovChain.rejection_report()`). This page shows how to verify the
+condition and how to add artificial candidates, which is now an optional
+initialization aid rather than a prerequisite.
 
 ## The condition
 

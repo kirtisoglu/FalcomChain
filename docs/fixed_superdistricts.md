@@ -129,7 +129,7 @@ from falcomchain import hierarchical_recom
 from falcomchain.markovchain.state import ChainState
 from falcomchain.markovchain.super_partitioners import fixed_super_partition
 
-# travel_times is required for the level-1 facility minimax (Eq. 17).
+# travel_times is required for the level-1 facility rule (demand-weighted 1-median).
 Assignment.travel_times = {
     (a, b): float(
         abs(graph.nodes[a]["C_X"] - graph.nodes[b]["C_X"])

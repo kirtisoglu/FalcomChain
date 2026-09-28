@@ -203,16 +203,18 @@ if not report.passes:
     # candidates from real ones.
 ```
 
-**LAS reality check.** On the London graph, the 66 real stations do
-*not* fragment the LSOA graph — the candidate-free subgraph remains
-one huge connected component, so Assumption 6.1 fails at every
-operational `(demand_target, c_min)` combination and the repair step
-is mandatory. At the paper's calibration the per-component demand cap
-is `Vol_max = c_min · (1 − ε) · w_unit = 9,254` calls per year, and
-repair grows the candidate set to 1,831 sites (66 real stations plus
-1,765 artificial — 36.7% of LSOAs). See
-[`analysis/01_feasibility.md`](https://github.com/kirtisoglu/London-Ambulance-Service-System/blob/main/analysis/01_feasibility.md)
-for the full report.
+**LAS reality check.** On the London graph the 66 real stations do
+*not* fragment the LSOA graph — the candidate-free subgraph is one huge
+connected component, so Assumption 6.1 fails at every operational
+`(demand_target, c_min)` combination. The chain nevertheless runs on the
+66 stations alone: the counting predicate keeps every proposal from
+stranding a candidate-free residual, and proposals that still cannot
+close are rejected and counted. Initialize zone by zone (the five LAS
+sectors, `super_assignment=`) rather than globally; on this instance the
+global recursion needs hundreds of tree draws per extraction and often
+fails, while the sector-wise one closes in seconds. Repairing the
+candidate set with artificial sites is no longer part of the London
+pipeline.
 
 Full details and strategy comparison: [Candidate Feasibility](feasibility.md).
 
