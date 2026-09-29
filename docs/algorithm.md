@@ -133,6 +133,36 @@ FalCom (the standard ReCom MH formulation requires the
 [RevReCom correction of Cannon et al. (SIAM Review, 2026)](https://arxiv.org/abs/2008.08054),
 which we have not implemented).
 
+## Cost of a step
+
+A step draws spanning trees of the supergraph until the level-2 recursion
+closes, then draws spanning trees of one merged superdistrict until the
+level-1 recursion closes. Profiling 300-step chains on the paper's sparse
+grids (seed 7, cProfile) puts the level-2 resampling at 1% of the step on
+grid_1000 (about 12 districts), 24% on grid_10000 (about 40) and 31% on
+grid_50000 (about 90): the supergraph term grows with the number of
+districts but stays below a third of the step at ninety. Three things
+decide the wall-clock time in practice:
+
+- **Retries.** A proposal that cannot close spends its whole retry budget
+  (`max_attempts`, 1,000 in the paper) drawing trees, so a rejected
+  proposal costs up to a thousand times an accepted one. On instances with
+  many rejections a smaller budget (100 to 200) cuts the run time
+  substantially; it also changes the transition kernel slightly (proposals
+  that would have closed late are rejected instead), so keep it fixed
+  within one study and report it.
+- **Tree draws.** Wilson's algorithm walks precomputed neighbour lists
+  (since version 0.x the residual graph is converted once per bipartition
+  call); a 300-step London chain went from 13.5 to 22.5 steps per second
+  with this and two smaller changes, bit-identically.
+- **Districts per call.** The recursion extracts districts one at a time
+  from a shrinking residual, so a call that must produce hundreds of
+  districts is slow and fails more often. Keep each call in the tens of
+  districts: on London the initial partition is built sector by sector
+  (11 to 17 stations each) and on the 50,000-node grid zone by zone
+  (blocks of about 5,000 nodes); the chain's own steps re-cut one
+  superdistrict of a few districts.
+
 ## Initial state
 
 The initial partition is constructed by applying Phase 2 to the base graph,
