@@ -67,9 +67,12 @@ set_seed(42)
 
 # Seed the initial partition on the *achievable* per-team load total / k
 # (with k = ceil(total / w) teams), not the raw target w: seeding on w
-# starves the last district below the balance window. Capacities stay in
-# the safe range c in {1, 2}, where the recursive partitioner provably
-# never stalls (see the paper); c >= 3 needs the capacity-block form.
+# starves the last district below the balance window. Keep c_max <= 3:
+# in that range the debt-corrected windows are never empty and the
+# recursion always closes (the paper's safe-range corollary); larger
+# capacities rely on rejection. On large graphs with few candidates, pass
+# super_assignment= to build the start zone by zone (see "Initial state"
+# on the Algorithm page).
 import math
 _total = sum(d["demand"] for _, d in graph.nodes(data=True))
 seed_demand_target = _total / max(1, math.ceil(_total / 1000))

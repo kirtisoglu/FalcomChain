@@ -178,6 +178,20 @@ re-executing anything.
    (`EnsembleStats.report()`) so plots can be regenerated without
    re-sampling.
 
+## Reproducing the paper's experiments
+
+The experiments of the FalCom paper (exact enumeration on 3x4 and 4x4
+grids, multi-start agreement and timing sweeps on synthetic grids of 100
+to 50,000 nodes, the London Ambulance Service ensemble on the 66 real
+stations, and the MILP comparison) live in the companion repository
+`London-Ambulance-Service-System`, under `falcomchain_experiments/`. Its
+README lists the exact commands, seeds and `PYTHONHASHSEED=0` settings,
+`gurobi/RUNBOOK.md` is the step-by-step procedure for the MILP runs, and
+every result the paper reports is committed next to the script that
+produced it. The synthetic grids use sparse candidate sets (1.5 sites per
+team, no augmentation) and zone-wise initial partitions; the augmented
+instances of an earlier draft are archived under `gurobi/data/augmented`.
+
 ## Where to go next
 
 - [Running a FalCom Chain](running_a_chain.md) — the run being made
