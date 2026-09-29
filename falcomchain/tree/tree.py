@@ -396,7 +396,20 @@ def random_spanning_tree(graph: nx.Graph) -> nx.Graph:
     return spanning_tree
 
 
-def uniform_spanning_tree(graph: nx.Graph) -> nx.Graph:
+def adjacency_lists(graph: nx.Graph) -> Dict:
+    """
+    Neighbour lists of ``graph`` in its iteration order, ``{u: [v, ...]}``.
+
+    Built once per residual graph and passed to
+    :func:`uniform_spanning_tree`, so that the up to ``max_attempts`` tree
+    draws of :func:`bipartition_tree` walk plain lists instead of a
+    networkx subgraph view (whose per-neighbour membership filter dominated
+    the run time of the level-2 resampling).
+    """
+    return {u: list(graph.neighbors(u)) for u in graph.nodes}
+
+
+def uniform_spanning_tree(graph: nx.Graph, adjacency: Optional[Dict] = None) -> nx.Graph:
     """
     Builds a spanning tree chosen uniformly from the space of all
     spanning trees of the graph using Wilson's algorithm (loop-erased
@@ -404,11 +417,15 @@ def uniform_spanning_tree(graph: nx.Graph) -> nx.Graph:
 
     :param graph: Networkx Graph
     :type graph: nx.Graph
+    :param adjacency: Optional neighbour lists from :func:`adjacency_lists`;
+        the random choices are the same with or without it.
 
     :returns: A spanning tree of the graph chosen uniformly at random.
     :rtype: nx.Graph
     """
-    nodes = list(graph.nodes)
+    if adjacency is None:
+        adjacency = adjacency_lists(graph)
+    nodes = list(adjacency)
     root = rng.choice(nodes)
     tree_nodes = {root}
     next_node = {root: None}
@@ -416,7 +433,7 @@ def uniform_spanning_tree(graph: nx.Graph) -> nx.Graph:
     for node in nodes:
         u = node
         while u not in tree_nodes:
-            next_node[u] = rng.choice(list(graph.neighbors(u)))
+            next_node[u] = rng.choice(adjacency[u])
             u = next_node[u]
 
         u = node
@@ -933,9 +950,14 @@ def bipartition_tree(
             message="residual graph is empty but capacity remains to be allocated",
         )
 
+    # The residual graph is fixed across the attempts: build its neighbour
+    # lists once so every draw walks lists rather than a subgraph view.
+    adjacency = adjacency_lists(graph) if tree_sampler is uniform_spanning_tree else None
+
     for _attempt_idx in range(max_attempts):
 
-        spanning_tree = tree_sampler(graph)
+        spanning_tree = (tree_sampler(graph, adjacency) if adjacency is not None
+                         else tree_sampler(graph))
 
         h = SpanningTree(
             graph=spanning_tree,

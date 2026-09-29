@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Performance
+
+- `bipartition_tree` builds the neighbour lists of the residual graph once
+  (`adjacency_lists`) and `uniform_spanning_tree` walks those lists instead
+  of a networkx subgraph view. Random choices are unchanged, so chains are
+  bit-identical; a 300-step London chain runs 1.55x faster (13.5 to 20.9
+  steps per second) because the level-2 retry loop no longer pays the
+  view's per-neighbour filter on every draw.
+
 ### Changed
 - **Balance rules named and checked.** The default rule keeps its behaviour
   and its name (`rule="per_team"`): the debt-clipped per-team window
