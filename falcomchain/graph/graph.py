@@ -772,11 +772,13 @@ class FrozenGraph:
     def __len__(self) -> int:
         return self.size
 
-    def __getattribute__(self, __name: str) -> Any:
-        try:
-            return object.__getattribute__(self, __name)
-        except AttributeError:
-            return object.__getattribute__(self.graph, __name)
+    def __getattr__(self, __name: str) -> Any:
+        # Called only when normal lookup fails: delegate to the wrapped graph.
+        # (A __getattribute__ override ran a Python-level try/except on every
+        # attribute access of the wrapper, about 5% of a chain's run time.)
+        if __name == "graph":
+            raise AttributeError(__name)
+        return getattr(object.__getattribute__(self, "graph"), __name)
 
     def __getitem__(self, __name: str) -> Any:
         return self.graph[__name]

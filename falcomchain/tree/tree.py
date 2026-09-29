@@ -355,25 +355,16 @@ def accumulate_tree(tree: SpanningTree, accumulation_columns):
     each node by traversing the graph using a depth-first search.
     return: None
     """
-    accumulated = set()
-    stack = deque([(tree.root)])
-
-    while stack:
-        node = stack.pop()
-        children = tree.successors.get(node, [])
-        if all(
-            c in accumulated for c in children
-        ):  # all children are processed, accumulate attributes from children to node
-            for column in accumulation_columns:
-                tree.graph.nodes[node][column] += sum(
-                    tree.graph.nodes[c][column] for c in children
-                )
-            accumulated.add(node)
-        else:
-            stack.append(node)
-            for c in children:
-                if c not in accumulated:
-                    stack.append(c)
+    # ``successors`` is in BFS order (insertion order of find_successors), so
+    # walking its keys backwards visits every child before its parent; leaves
+    # are not keys and keep their own attribute values. Same sums, in the same
+    # order, as the former explicit-stack post-order traversal.
+    nodes = tree.graph.nodes
+    successors = tree.successors
+    for node in reversed(list(successors)):
+        children = successors[node]
+        for column in accumulation_columns:
+            nodes[node][column] += sum(nodes[c][column] for c in children)
 
 
 def random_spanning_tree(graph: nx.Graph) -> nx.Graph:

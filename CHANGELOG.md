@@ -14,6 +14,11 @@ adheres to [Semantic Versioning](https://semver.org/).
   bit-identical; a 300-step London chain runs 1.55x faster (13.5 to 20.9
   steps per second) because the level-2 retry loop no longer pays the
   view's per-neighbour filter on every draw.
+- `Graph.__getattribute__` (a Python-level try/except on every attribute
+  access of the wrapper) replaced by `__getattr__`, and `accumulate_tree`
+  walks the BFS order backwards instead of re-checking an explicit stack.
+  Both keep every sum and every random draw unchanged; together with the
+  neighbour lists the London chain runs 1.67x faster (22.5 steps per second).
 
 ### Changed
 - **Balance rules named and checked.** The default rule keeps its behaviour
