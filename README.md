@@ -33,6 +33,12 @@ candidates, FalcomChain:
 4. **Records** every chain step for ensemble analysis (boundary frequency,
    facility stability, capacity utilization).
 
+A step costs time linear in the size of the residual graph it re-cuts. On
+one core of a 2026 cloud container, a 66-station London instance (4,994
+units) runs at about 20 steps per second and a 50,000-unit grid at about
+11 steps per second; see `docs/algorithm.md` ("Cost of a step") for the
+breakdown and `docs/reproducibility.md` for the experiment scripts.
+
 ---
 
 ## Installation
