@@ -1253,6 +1253,22 @@ def capacitated_recursive_tree(
                 check_super_residual=check_super_residual and supergraph,
             )
 
+        except CutSearchExhausted as exc:
+            # Diagnostic for the rejection accounting (paper, Section 6.1):
+            # whether the residual that could not be cut lies inside the
+            # window of its remaining capacity. A residual outside that
+            # window admits no partition on any tree (a demand failure);
+            # one inside it failed for lack of an admissible subtree on the
+            # sampled trees (a tree failure).
+            d_res = float(sum(graph.nodes[n]["demand"] for n in remaining_nodes))
+            centre = float(new_demand_target) * remaining_teams
+            half = float(new_epsilon) * centre
+            exc.residual_demand = d_res
+            exc.residual_teams = int(remaining_teams)
+            exc.residual_in_window = bool(abs(d_res - centre) <= half)
+            exc.extractions_done = len(current_new_ids)
+            exc.two_sided = bool(two_sided)
+            raise
         except Exception:
             raise
 

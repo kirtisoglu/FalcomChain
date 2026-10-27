@@ -154,6 +154,7 @@ class Partition:
         max_attempts: int = 5000,
         count_candidates: bool = True,
         local_target: bool = True,
+        total_teams: Optional[int] = None,
     ) -> "Partition":
         """
         Create a Partition with a random assignment of nodes to districts.
@@ -208,7 +209,7 @@ class Partition:
                 enforce_global_balance=enforce_global_balance,
                 psi_fn=psi_fn, super_psi_fn=super_psi_fn,
                 max_attempts=max_attempts, count_candidates=count_candidates,
-                local_target=local_target,
+                local_target=local_target, total_teams=total_teams,
             )
         partition = cls._from_random_global(
             graph, epsilon, demand_target, capacity_level, density,
@@ -326,8 +327,18 @@ class Partition:
         max_attempts: int = 5000,
         count_candidates: bool = True,
         local_target: bool = True,
+        total_teams: Optional[int] = None,
     ) -> "Partition":
         """Partition each superdistrict (zone) independently and stitch.
+
+        ``total_teams`` fixes the total capacity of the initial state. When
+        it is given, exactly ``total_teams`` units are apportioned across the
+        zones by the largest-remainder rule on ``zone_demand / demand_target``
+        (every zone keeps at least one unit), so that the initial state
+        satisfies the paper's coverage rule, sum of capacities equal to
+        ``ceil(d / w)``. When it is ``None`` each zone receives
+        ``ceil(zone_demand / demand_target)`` units, a total that can exceed
+        ``ceil(d / w)`` by up to the number of zones minus one.
 
         With ``local_target=True`` (default) each zone is cut against its own
         per-team target ``zone_demand / zone_teams`` (paper, Remark A.5), so
@@ -358,10 +369,30 @@ class Partition:
         next_id_offset = 0
         log_proposal_ratio = 0.0
 
+        zone_pops = {z: sum(graph.nodes[n]["demand"] for n in nodes)
+                     for z, nodes in zones.items()}
+        if total_teams is None:
+            alloc = {z: math.ceil(zone_pops[z] / demand_target) for z in zones}
+        else:
+            shares = {z: zone_pops[z] / demand_target for z in zones}
+            alloc = {z: max(1, math.floor(shares[z])) for z in zones}
+            remainder = int(total_teams) - sum(alloc.values())
+            if remainder < 0:
+                raise ValueError(
+                    f"total_teams={total_teams} is below the floor allocation "
+                    f"{sum(alloc.values())} of the {len(zones)} zones."
+                )
+            order = sorted(zones, key=lambda z: shares[z] - math.floor(shares[z]), reverse=True)
+            i = 0
+            while remainder > 0:
+                alloc[order[i % len(order)]] += 1
+                remainder -= 1
+                i += 1
+
         for zone_id, zone_nodes in zones.items():
             zone_subgraph = graph.subgraph(zone_nodes)
-            zone_pop = sum(graph.nodes[n]["demand"] for n in zone_nodes)
-            zone_teams = math.ceil(zone_pop / demand_target)
+            zone_pop = zone_pops[zone_id]
+            zone_teams = alloc[zone_id]
             min_feasible = (1 - epsilon) * c_min * demand_target
             if zone_teams < 1 or zone_pop < min_feasible:
                 raise ValueError(

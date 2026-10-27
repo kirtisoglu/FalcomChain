@@ -148,6 +148,7 @@ class MarkovChain:
         # plus the label of the most recent rejection (None after an accept).
         self.rejections = Counter()
         self.last_rejection = None
+        self.last_rejection_exc = None
 
         # Attach recorder to state so proposal functions can access it
         if recorder is not None:
@@ -246,10 +247,12 @@ class MarkovChain:
             # as a rejection rather than killing the chain — the chain stays
             # at the current state for this step. The proposed_next_state may
             # also fail validity / acceptance checks; same outcome.
+            self.last_rejection_exc = None
             try:
                 proposed_next_state = self.proposal(self.state)
             except RuntimeError as exc:
                 proposed_next_state = None
+                self.last_rejection_exc = exc
                 self._record_rejection(classify_rejection(exc))
 
             if proposed_next_state is not None:
