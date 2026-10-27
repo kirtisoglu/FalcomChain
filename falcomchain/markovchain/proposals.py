@@ -16,6 +16,11 @@ from falcomchain.tree.tree import (
 )
 
 from .super_partitioners import resample_super_partition
+import time as _time
+
+# Wall-clock split of the most recent proposal, for the scalability probe:
+# seconds spent re-partitioning the supergraph and re-cutting the base subgraph.
+LAST_TIMING = {"super_seconds": 0.0, "base_seconds": 0.0}
 
 class MetagraphError(Exception):
     """
@@ -152,22 +157,28 @@ def hierarchical_recom(
     if rec is not None:
         rec.begin_level("supergraph", partition=partition)
 
-    super_flip, merge, super_teams, super_demand, log_super_ratio = (
-        super_partitioner(
-            state,
-            epsilon_super=epsilon_super,
-            demand_target=demand_target,
-            c_min_super=c_min_super,
-            c_max_super=c_max_super,
-            density=density,
-            recorder=rec,
-            super_psi_fn=super_psi_fn,
-            gamma_super=gamma_super,
-            max_attempts=max_attempts_super,
-            min_districts_super=min_districts_super,
-            check_super_residual=check_super_residual,
+    LAST_TIMING["super_seconds"] = 0.0
+    LAST_TIMING["base_seconds"] = 0.0
+    _t_super = _time.perf_counter()
+    try:
+        super_flip, merge, super_teams, super_demand, log_super_ratio = (
+            super_partitioner(
+                state,
+                epsilon_super=epsilon_super,
+                demand_target=demand_target,
+                c_min_super=c_min_super,
+                c_max_super=c_max_super,
+                density=density,
+                recorder=rec,
+                super_psi_fn=super_psi_fn,
+                gamma_super=gamma_super,
+                max_attempts=max_attempts_super,
+                min_districts_super=min_districts_super,
+                check_super_residual=check_super_residual,
+            )
         )
-    )
+    finally:
+        LAST_TIMING["super_seconds"] = _time.perf_counter() - _t_super
 
     if rec is not None:
         super_centers = {}
@@ -205,16 +216,20 @@ def hierarchical_recom(
     # Initial debt is 0 by construction at the lower level: new_demand_target
     # is recomputed locally as super_demand / super_teams (Remark A.5 in the
     # paper). No initial-debt argument is passed.
-    flip = method(
-        graph=subgraph,
-        n_teams=int(super_teams),
-        merged_ids=set(merge.copy()),
-        assignments=sub_assignments,
-        max_id=max_id,
-        demand_target=new_demand_target,
-        epsilon=epsilon_base,
-        iteration=partition.step,
-    )
+    _t_base = _time.perf_counter()
+    try:
+        flip = method(
+            graph=subgraph,
+            n_teams=int(super_teams),
+            merged_ids=set(merge.copy()),
+            assignments=sub_assignments,
+            max_id=max_id,
+            demand_target=new_demand_target,
+            epsilon=epsilon_base,
+            iteration=partition.step,
+        )
+    finally:
+        LAST_TIMING["base_seconds"] = _time.perf_counter() - _t_base
     flip = flip.add_merged_ids(merge)
 
     # The kappa constraint (every super-district bundles at least
