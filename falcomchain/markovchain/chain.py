@@ -149,6 +149,7 @@ class MarkovChain:
         self.rejections = Counter()
         self.last_rejection = None
         self.last_rejection_exc = None
+        self._rejection_detail = {}
 
         # Attach recorder to state so proposal functions can access it
         if recorder is not None:
@@ -254,6 +255,11 @@ class MarkovChain:
                 proposed_next_state = None
                 self.last_rejection_exc = exc
                 self._record_rejection(classify_rejection(exc))
+                if hasattr(exc, "residual_in_window"):
+                    detail = (f"{classify_rejection(exc)}:"
+                              f"{'tree' if exc.residual_in_window else 'demand'}:"
+                              f"{'closing' if exc.two_sided else 'open'}")
+                    self._rejection_detail[detail] = self._rejection_detail.get(detail, 0) + 1
 
             if proposed_next_state is not None:
                 if not self.is_valid(proposed_next_state.partition):
@@ -304,6 +310,7 @@ class MarkovChain:
             "rejected": rejected,
             "acceptance_rate": (accepted / steps) if steps else float("nan"),
             "causes": dict(self.rejections),
+            "causes_detail": dict(getattr(self, "_rejection_detail", {})),
         }
 
     def __len__(self) -> int:
