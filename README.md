@@ -89,6 +89,16 @@ not on separate sites:
 
 ---
 
+## Reproducing the paper
+
+The experiments of *FalCom: An MCMC Sampling Framework for Facility Location and
+Districting Problems* (Kırtışoğlu and Kaul, 2026) use this library at the tag
+`paper-2026-10`. The experiment code, the London data assembly, the stored
+outputs of every reported chain and the manuscript sources live in the companion
+repository
+[London-Ambulance-Service-System](https://github.com/kirtisoglu/London-Ambulance-Service-System),
+whose `paper/README.md` maps every section of the paper to its scripts and outputs.
+
 ## Companion libraries
 
 FalcomChain is one of three small, decoupled libraries that together
